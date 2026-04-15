@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>חתימה דיגיטלית — דשבורד</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial, sans-serif; background: #f5f5f5; color: #333; }
+    header {
+      background: #2563eb; color: #fff; padding: 16px 32px;
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    header h1 { font-size: 22px; }
+    .btn {
+      padding: 10px 20px; border: none; border-radius: 6px;
+      cursor: pointer; font-size: 14px; font-weight: bold;
+    }
+    .btn-primary { background: #2563eb; color: #fff; }
+    .btn-primary:hover { background: #1d4ed8; }
+    .btn-danger { background: #dc2626; color: #fff; }
+    .btn-danger:hover { background: #b91c1c; }
+    .btn-secondary { background: #6b7280; color: #fff; }
+    .btn-secondary:hover { background: #4b5563; }
+
+    /* התחברות */
+    #login-section {
+      max-width: 400px; margin: 80px auto; background: #fff;
+      padding: 32px; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.1);
+    }
+    #login-section h2 { margin-bottom: 20px; text-align: center; }
+    #login-section input {
+      width: 100%; padding: 12px; margin-bottom: 12px;
+      border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;
+    }
+    #login-section .btn { width: 100%; }
+    .error-msg { color: #dc2626; font-size: 13px; margin-bottom: 8px; }
+
+    /* דשבורד */
+    #dashboard-section { display: none; max-width: 800px; margin: 32px auto; padding: 0 16px; }
+    .upload-area {
+      background: #fff; padding: 24px; border-radius: 12px; margin-bottom: 24px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06); text-align: center;
+    }
+    .upload-area input[type="file"] { margin-bottom: 12px; }
+    .doc-list { list-style: none; }
+    .doc-item {
+      background: #fff; padding: 16px 20px; border-radius: 8px; margin-bottom: 10px;
+      display: flex; justify-content: space-between; align-items: center;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    }
+    .doc-info { flex: 1; }
+    .doc-info h3 { font-size: 16px; margin-bottom: 4px; }
+    .doc-info span { font-size: 13px; color: #6b7280; }
+    .status-badge {
+      display: inline-block; padding: 3px 10px; border-radius: 12px;
+      font-size: 12px; font-weight: bold; margin-right: 8px;
+    }
+    .status-draft { background: #fef3c7; color: #92400e; }
+    .status-sent { background: #dbeafe; color: #1e40af; }
+    .status-completed { background: #d1fae5; color: #065f46; }
+    .doc-actions { display: flex; gap: 8px; }
+    .doc-actions .btn { padding: 6px 14px; font-size: 13px; }
+    .empty-state { text-align: center; color: #9ca3af; padding: 40px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>חתימה דיגיטלית</h1>
+    <div id="header-user" style="display:none;">
+      <span id="user-email" style="margin-left:12px;"></span>
+      <button class="btn btn-secondary" onclick="logout()">התנתק</button>
+    </div>
+  </header>
+
+  <!-- מסך התחברות -->
+  <div id="login-section">
+    <h2>התחברות</h2>
+    <div id="login-error" class="error-msg" style="display:none;"></div>
+    <input type="email" id="login-email" placeholder="אימייל" />
+    <input type="password" id="login-password" placeholder="סיסמה" />
+    <button class="btn btn-primary" onclick="login()">התחבר</button>
+  </div>
+
+  <!-- דשבורד -->
+  <div id="dashboard-section">
+    <div class="upload-area">
+      <h2>העלאת מסמך חדש</h2>
+      <p style="margin:8px 0 16px; color:#6b7280;">בחר קובץ PDF להעלאה</p>
+      <input type="file" id="pdf-file" accept=".pdf" />
+      <br />
+      <button class="btn btn-primary" onclick="uploadPdf()">העלה מסמך</button>
+    </div>
+
+    <h2 style="margin-bottom:16px;">המסמכים שלי</h2>
+    <ul class="doc-list" id="doc-list">
+      <li class="empty-state">טוען מסמכים...</li>
+    </ul>
+  </div>
+
+  <script>
+    // בדיקת חיבור בטעינה
+    async function checkAuth() {
+      try {
+        const res = await fetch('/api/auth/me');
+        if (res.ok) {
+          const user = await res.json();
+          showDashboard(user.email);
+        }
+      } catch (e) { /* לא מחובר */ }
+    }
+
+    function showDashboard(email) {
+      document.getElementById('login-section').style.display = 'none';
+      document.getElementById('dashboard-section').style.display = 'block';
+      document.getElementById('header-user').style.display = 'flex';
+      document.getElementById('user-email').textContent = email;
+      loadDocuments();
+    }
+
+    async function login() {
+      const email = document.getElementById('login-email').value;
+      const password = document.getElementById('login-password').value;
+      const errorEl = document.getElementById('login-error');
+      errorEl.style.display = 'none';
+
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        showDashboard(data.email);
+      } else {
+        errorEl.textContent = data.error;
+        errorEl.style.display = 'block';
+      }
+    }
+
+    async function logout() {
+      await fetch('/api/auth/logout', { method: 'POST' });
+      location.reload();
+    }
+
+    async function uploadPdf() {
+      const fileInput = document.getElementById('pdf-file');
+      if (!fileInput.files[0]) return alert('יש לבחור קובץ PDF');
+
+      const formData = new FormData();
+      formData.append('pdf', fileInput.files[0]);
+
+      const res = await fetch('/api/documents/upload', { method: 'POST', body: formData });
+      const data = await res.json();
+
+      if (res.ok) {
+        window.location.href = `/editor?doc=${data.documentId}`;
+      } else {
+        alert(data.error);
+      }
+    }
+
+    async function loadDocuments() {
+      const res = await fetch('/api/documents');
+      const docs = await res.json();
+      const list = document.getElementById('doc-list');
+
+      if (!docs.length) {
+        list.innerHTML = '<li class="empty-state">אין מסמכים עדיין. העלה את המסמך הראשון!</li>';
+        return;
+      }
+
+      list.innerHTML = docs.map(doc => `
+        <li class="doc-item">
+          <div class="doc-info">
+            <h3>${doc.filename}</h3>
+            <span class="status-badge status-${doc.status}">${statusLabel(doc.status)}</span>
+            <span>${new Date(doc.created_at).toLocaleDateString('he-IL')}</span>
+          </div>
+          <div class="doc-actions">
+            <button class="btn btn-primary" onclick="location.href='/editor?doc=${doc.id}'">עריכה</button>
+            <button class="btn btn-danger" onclick="deleteDoc('${doc.id}')">מחיקה</button>
+          </div>
+        </li>
+      `).join('');
+    }
+
+    function statusLabel(status) {
+      const labels = { draft: 'טיוטה', sent: 'נשלח', completed: 'נחתם' };
+      return labels[status] || status;
+    }
+
+    async function deleteDoc(id) {
+      if (!confirm('למחוק את המסמך?')) return;
+      const res = await fetch(`/api/documents/${id}`, { method: 'DELETE' });
+      if (res.ok) loadDocuments();
+      else alert('שגיאה במחיקה');
+    }
+
+    // Enter לשליחת login
+    document.getElementById('login-password').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') login();
+    });
+
+    checkAuth();
+  </script>
+</body>
+</html>

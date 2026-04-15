@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>חתימה על מסמך</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial, sans-serif; background: #f5f5f5; color: #333; }
+    header {
+      background: #16a34a; color: #fff; padding: 16px 32px; text-align: center;
+    }
+    header h1 { font-size: 22px; }
+    header p { font-size: 14px; margin-top: 4px; opacity: 0.9; }
+
+    .btn {
+      padding: 10px 20px; border: none; border-radius: 6px;
+      cursor: pointer; font-size: 14px; font-weight: bold;
+    }
+    .btn-success { background: #16a34a; color: #fff; }
+    .btn-success:hover { background: #15803d; }
+    .btn-secondary { background: #6b7280; color: #fff; }
+    .btn-secondary:hover { background: #4b5563; }
+
+    .container { max-width: 900px; margin: 24px auto; padding: 0 16px; }
+
+    #pdf-container {
+      position: relative; background: #fff; margin-bottom: 24px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.1); display: flex; justify-content: center;
+    }
+    #pdf-canvas { display: block; }
+    .field-overlay {
+      position: absolute; border: 3px solid #2563eb; background: rgba(37,99,235,0.1);
+      border-radius: 4px; display: flex; align-items: center; justify-content: center;
+      font-size: 13px; color: #2563eb; font-weight: bold; cursor: pointer;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { border-color: #2563eb; }
+      50% { border-color: #93c5fd; }
+    }
+
+    .page-nav {
+      display: flex; justify-content: center; align-items: center; gap: 16px;
+      padding: 16px; font-size: 14px;
+    }
+
+    #signature-section {
+      background: #fff; padding: 24px; border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06); text-align: center; margin-bottom: 24px;
+    }
+    #signature-section h2 { margin-bottom: 16px; font-size: 18px; }
+    #sig-canvas {
+      border: 2px dashed #d1d5db; border-radius: 8px; cursor: crosshair;
+      background: #fff; touch-action: none;
+    }
+    .sig-actions { display: flex; justify-content: center; gap: 12px; margin-top: 16px; }
+
+    /* הודעות */
+    #error-msg {
+      text-align: center; padding: 60px; font-size: 18px; color: #dc2626;
+      display: none;
+    }
+    #success-msg {
+      text-align: center; padding: 60px; display: none;
+    }
+    #success-msg h2 { color: #16a34a; font-size: 28px; margin-bottom: 12px; }
+    #success-msg p { color: #6b7280; font-size: 16px; }
+
+    #loading { text-align: center; padding: 60px; color: #6b7280; font-size: 16px; }
+
+    .active-field { background: rgba(37,99,235,0.25) !important; border-color: #1d4ed8 !important; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>חתימה על מסמך</h1>
+    <p id="header-info"></p>
+  </header>
+
+  <div class="container">
+    <div id="loading">טוען מסמך...</div>
+    <div id="error-msg"></div>
+    <div id="success-msg">
+      <h2>✓ המסמך נחתם בהצלחה!</h2>
+      <p>החתימה נשמרה ונשלחה לבעל המסמך.</p>
+    </div>
+
+    <div id="main-content" style="display:none;">
+      <div class="page-nav">
+        <button class="btn btn-secondary" onclick="prevPage()">→ הקודם</button>
+        <span>עמוד <strong id="page-num">1</strong> מתוך <strong id="page-count">1</strong></span>
+        <button class="btn btn-secondary" onclick="nextPage()">הבא ←</button>
+      </div>
+
+      <div id="pdf-container">
+        <canvas id="pdf-canvas"></canvas>
+      </div>
+
+      <div id="signature-section">
+        <h2>חתום כאן</h2>
+        <canvas id="sig-canvas" width="500" height="180"></canvas>
+        <div class="sig-actions">
+          <button class="btn btn-secondary" onclick="clearSignature()">נקה חתימה</button>
+          <button class="btn btn-success" onclick="submitSignature()">שלח חתימה</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/sign.js"></script>
+</body>
+</html>

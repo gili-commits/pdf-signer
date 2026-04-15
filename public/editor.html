@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>עורך מסמך — חתימה דיגיטלית</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial, sans-serif; background: #f0f2f5; color: #333; }
+
+    header {
+      background: #2563eb; color: #fff; padding: 14px 24px;
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    header h1 { font-size: 20px; }
+    .header-btns { display: flex; gap: 8px; }
+
+    .btn {
+      padding: 8px 18px; border: none; border-radius: 6px;
+      cursor: pointer; font-size: 13px; font-weight: bold;
+    }
+    .btn-white { background: #fff; color: #2563eb; }
+    .btn-white:hover { background: #e0e7ff; }
+    .btn-success { background: #16a34a; color: #fff; }
+    .btn-success:hover { background: #15803d; }
+    .btn-warning { background: #f59e0b; color: #fff; }
+    .btn-warning:hover { background: #d97706; }
+    .btn-secondary { background: #6b7280; color: #fff; }
+    .btn-secondary:hover { background: #4b5563; }
+    .btn-danger { background: #dc2626; color: #fff; }
+
+    .toolbar {
+      background: #fff; padding: 10px 24px; display: flex; align-items: center; gap: 6px;
+      border-bottom: 1px solid #e5e7eb; flex-wrap: wrap;
+    }
+    .toolbar .sep { width: 1px; height: 28px; background: #d1d5db; margin: 0 6px; }
+    .toolbar select, .toolbar input[type="number"], .toolbar input[type="color"] {
+      padding: 5px 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 13px;
+    }
+
+    .page-nav {
+      display: flex; justify-content: center; align-items: center; gap: 16px;
+      padding: 12px; font-size: 14px;
+    }
+
+    #pdf-container {
+      position: relative; margin: 16px auto; width: fit-content;
+      background: #fff; box-shadow: 0 2px 16px rgba(0,0,0,0.12);
+      direction: ltr;
+    }
+    #pdf-canvas { display: block; }
+    .canvas-container { position: absolute !important; top: 0; left: 0; z-index: 10; }
+
+    .modal-overlay {
+      display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.5); z-index: 1000;
+      justify-content: center; align-items: center;
+    }
+    .modal-overlay.active { display: flex; }
+    .modal {
+      background: #fff; padding: 28px; border-radius: 12px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+    }
+    .modal h2 { margin-bottom: 16px; }
+    .modal input[type="text"], .modal input[type="email"] {
+      width: 100%; padding: 10px; margin-bottom: 10px;
+      border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;
+    }
+    .modal-actions { display: flex; gap: 10px; margin-top: 12px; }
+
+    #sig-modal-canvas {
+      border: 2px dashed #d1d5db; border-radius: 8px; cursor: crosshair;
+      background: #fff; display: block; margin: 0 auto;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>עורך מסמך</h1>
+    <div class="header-btns">
+      <button class="btn btn-white" onclick="location.href='/'">חזרה</button>
+      <button class="btn btn-warning" onclick="downloadPdf()">הורד PDF</button>
+      <button class="btn btn-success" onclick="openSendModal()">שלח לחתימה</button>
+    </div>
+  </header>
+
+  <div class="toolbar">
+    <!-- כפתורי הוספה -->
+    <button class="btn btn-secondary" onclick="addWhiteout()">▢ מחיקת טקסט</button>
+    <button class="btn btn-secondary" onclick="addText()">T הוסף טקסט</button>
+    <button class="btn btn-secondary" onclick="addSigField()">✎ שדה חתימה</button>
+    <button class="btn btn-secondary" onclick="openSigModal()">✍ חתום בעצמך</button>
+    <div class="sep"></div>
+
+    <!-- עיצוב טקסט -->
+    <label style="font-size:13px; color:#6b7280;">גודל:</label>
+    <button class="btn btn-secondary" onclick="changeFontSize(-2)" style="padding:4px 8px;">A-</button>
+    <input type="number" id="font-size" value="16" min="8" max="72" style="width:50px;" onchange="applyFontSize()" />
+    <button class="btn btn-secondary" onclick="changeFontSize(2)" style="padding:4px 8px;">A+</button>
+    <button class="btn btn-secondary" id="btn-bold" onclick="toggleBold()" style="padding:4px 10px;"><b>B</b></button>
+    <input type="color" id="font-color" value="#000000" onchange="applyFontColor()" title="צבע טקסט" />
+    <div class="sep"></div>
+
+    <button class="btn btn-danger" onclick="deleteSelected()" style="padding:6px 12px;">מחק נבחר</button>
+  </div>
+
+  <div class="page-nav">
+    <button class="btn btn-secondary" onclick="prevPage()">→ הקודם</button>
+    <span>עמוד <strong id="page-num">1</strong> מתוך <strong id="page-count">1</strong></span>
+    <button class="btn btn-secondary" onclick="nextPage()">הבא ←</button>
+  </div>
+
+  <div id="pdf-container">
+    <canvas id="pdf-canvas"></canvas>
+    <canvas id="fabric-canvas"></canvas>
+  </div>
+
+  <!-- Modal שליחה -->
+  <div class="modal-overlay" id="send-modal">
+    <div class="modal" style="width:380px;">
+      <h2>שליחה לחתימה</h2>
+      <p style="font-size:13px; color:#6b7280; margin-bottom:12px;">
+        סמן שדה חתימה על המסמך לפני השליחה (כפתור "✎ שדה חתימה")
+      </p>
+      <input type="text" id="recipient-name" placeholder="שם הנמען" />
+      <input type="email" id="recipient-email" placeholder="אימייל הנמען" />
+      <div class="modal-actions">
+        <button class="btn btn-success" onclick="sendForSignature()">שלח</button>
+        <button class="btn btn-secondary" onclick="closeSendModal()">ביטול</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal חתימה עצמית -->
+  <div class="modal-overlay" id="sig-modal">
+    <div class="modal" style="width:540px;">
+      <h2>צייר חתימה</h2>
+      <canvas id="sig-modal-canvas" width="490" height="180"></canvas>
+      <div class="modal-actions">
+        <button class="btn btn-success" onclick="confirmSignature()">אישור</button>
+        <button class="btn btn-secondary" onclick="clearSigPad()">נקה</button>
+        <button class="btn btn-secondary" onclick="closeSigModal()">ביטול</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/editor.js"></script>
+</body>
+</html>
