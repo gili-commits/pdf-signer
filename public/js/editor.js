@@ -12,6 +12,7 @@ let pageObjects = {}; // שמירת אובייקטים בין עמודים
 
 // Signature pad
 let sigPadCanvas, sigPadCtx, sigDrawing = false, sigHasDrawn = false;
+let sigTargetField = null; // שדה חתימה שעליו לחצו דאבל-קליק
 
 // === אתחול ===
 async function init() {
@@ -32,6 +33,15 @@ async function init() {
     fabricCanvas.on('selection:updated', syncToolbar);
     fabricCanvas.on('selection:cleared', () => {
       document.getElementById('btn-bold').classList.remove('active');
+    });
+
+    // דאבל-קליק על שדה חתימה — פותח משטח ציור
+    fabricCanvas.on('mouse:dblclick', (opt) => {
+      const target = opt.target;
+      if (target && target.objType === 'sigField') {
+        sigTargetField = target;
+        openSigModal();
+      }
     });
 
     initSigPad();
@@ -241,6 +251,8 @@ function sigMove(e) { if (!sigDrawing) return; sigPadCtx.lineTo(e.offsetX, e.off
 function sigStop() { sigDrawing = false; }
 
 function openSigModal() {
+  // אם נקרא מכפתור "חתום בעצמך" (לא מדאבל-קליק על שדה) — אפס
+  if (!sigTargetField) sigTargetField = null;
   clearSigPad();
   document.getElementById('sig-modal').classList.add('active');
 }
@@ -250,7 +262,20 @@ function clearSigPad() { sigPadCtx.clearRect(0, 0, sigPadCanvas.width, sigPadCan
 function confirmSignature() {
   if (!sigHasDrawn) { alert('יש לצייר חתימה'); return; }
   const dataUrl = sigPadCanvas.toDataURL('image/png');
-  addSignedImage(100, 100, 200, 60, dataUrl);
+
+  if (sigTargetField) {
+    // החלף את שדה החתימה בתמונת החתימה
+    const x = sigTargetField.left;
+    const y = sigTargetField.top;
+    const w = sigTargetField.width * (sigTargetField.scaleX || 1);
+    const h = sigTargetField.height * (sigTargetField.scaleY || 1);
+    fabricCanvas.remove(sigTargetField);
+    addSignedImage(x, y, w, h, dataUrl);
+    sigTargetField = null;
+  } else {
+    // חתימה חופשית (כפתור "חתום בעצמך")
+    addSignedImage(100, 100, 200, 60, dataUrl);
+  }
   closeSigModal();
 }
 
