@@ -1,17 +1,14 @@
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.GMAIL_USER,
-    pass: process.env.GMAIL_PASS
-  }
-});
+const resend = new Resend(process.env.RESEND_API_KEY);
+
+// כתובת השולח — ברירת מחדל של Resend או דומיין מאומת
+const FROM_EMAIL = process.env.FROM_EMAIL || 'onboarding@resend.dev';
 
 async function sendSignatureRequest(recipientEmail, recipientName, signUrl) {
-  await transporter.sendMail({
-    from: `"חתימה דיגיטלית" <${process.env.GMAIL_USER}>`,
-    to: recipientEmail,
+  const { error } = await resend.emails.send({
+    from: `חתימה דיגיטלית <${FROM_EMAIL}>`,
+    to: [recipientEmail],
     subject: 'בקשה לחתימה על מסמך',
     html: `
       <div dir="rtl" style="font-family: Arial, sans-serif;">
@@ -27,12 +24,17 @@ async function sendSignatureRequest(recipientEmail, recipientName, signUrl) {
       </div>
     `
   });
+
+  if (error) {
+    console.error('Resend error:', error);
+    throw new Error(error.message);
+  }
 }
 
 async function sendSignedNotification(ownerEmail, documentName, downloadUrl) {
-  await transporter.sendMail({
-    from: `"חתימה דיגיטלית" <${process.env.GMAIL_USER}>`,
-    to: ownerEmail,
+  const { error } = await resend.emails.send({
+    from: `חתימה דיגיטלית <${FROM_EMAIL}>`,
+    to: [ownerEmail],
     subject: `המסמך "${documentName}" נחתם בהצלחה`,
     html: `
       <div dir="rtl" style="font-family: Arial, sans-serif;">
@@ -48,6 +50,11 @@ async function sendSignedNotification(ownerEmail, documentName, downloadUrl) {
       </div>
     `
   });
+
+  if (error) {
+    console.error('Resend error:', error);
+    throw new Error(error.message);
+  }
 }
 
 module.exports = { sendSignatureRequest, sendSignedNotification };

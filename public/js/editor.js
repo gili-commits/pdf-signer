@@ -1,3 +1,5 @@
+console.log('editor.js loaded');
+
 const params = new URLSearchParams(window.location.search);
 const docId = params.get('doc');
 if (!docId) { alert('מסמך לא נמצא'); window.location.href = '/'; }
@@ -13,23 +15,31 @@ let sigPadCanvas, sigPadCtx, sigDrawing = false, sigHasDrawn = false;
 
 // === אתחול ===
 async function init() {
-  const pagesRes = await fetch(`/api/documents/${docId}/pages`);
-  if (!pagesRes.ok) { alert('שגיאה בטעינת המסמך'); return; }
-  pagesInfo = await pagesRes.json();
-  totalPages = pagesInfo.totalPages;
-  document.getElementById('page-count').textContent = totalPages;
+  try {
+    console.log('init started, docId:', docId);
+    const pagesRes = await fetch(`/api/documents/${docId}/pages`);
+    console.log('pages response:', pagesRes.status);
+    if (!pagesRes.ok) { alert('שגיאה בטעינת המסמך'); return; }
+    pagesInfo = await pagesRes.json();
+    totalPages = pagesInfo.totalPages;
+    document.getElementById('page-count').textContent = totalPages;
 
-  fabricCanvas = new fabric.Canvas('fabric-canvas', { selection: true });
+    fabricCanvas = new fabric.Canvas('fabric-canvas', { selection: true });
+    console.log('fabricCanvas created');
 
-  // סנכרון סרגל כלים כשבוחרים אובייקט טקסט
-  fabricCanvas.on('selection:created', syncToolbar);
-  fabricCanvas.on('selection:updated', syncToolbar);
-  fabricCanvas.on('selection:cleared', () => {
-    document.getElementById('btn-bold').classList.remove('active');
-  });
+    // סנכרון סרגל כלים כשבוחרים אובייקט טקסט
+    fabricCanvas.on('selection:created', syncToolbar);
+    fabricCanvas.on('selection:updated', syncToolbar);
+    fabricCanvas.on('selection:cleared', () => {
+      document.getElementById('btn-bold').classList.remove('active');
+    });
 
-  initSigPad();
-  await renderPage(currentPage);
+    initSigPad();
+    await renderPage(currentPage);
+    console.log('init completed');
+  } catch (err) {
+    console.error('init error:', err);
+  }
 }
 
 // === הוספת מלבן מחיקה (whiteout) ===
@@ -311,10 +321,14 @@ async function downloadPdf() {
 }
 
 // === שליחה לחתימה ===
-function openSendModal() { document.getElementById('send-modal').classList.add('active'); }
+function openSendModal() {
+  console.log('openSendModal called');
+  document.getElementById('send-modal').classList.add('active');
+}
 function closeSendModal() { document.getElementById('send-modal').classList.remove('active'); }
 
 async function sendForSignature() {
+  console.log('sendForSignature called');
   const name = document.getElementById('recipient-name').value.trim();
   const email = document.getElementById('recipient-email').value.trim();
   if (!name || !email) { alert('יש למלא שם ואימייל'); return; }
@@ -340,6 +354,8 @@ async function sendForSignature() {
     });
   }
 
+  console.log('sigFields collected:', sigFields.length, sigFields);
+
   if (sigFields.length === 0) {
     alert('יש להוסיף לפחות שדה חתימה אחד (כפתור "✎ שדה חתימה")');
     return;
@@ -355,7 +371,18 @@ async function sendForSignature() {
     })
   });
   const data = await res.json();
-  if (res.ok) { alert('נשלח בהצלחה!'); closeSendModal(); }
+  if (res.ok) {
+    closeSendModal();
+    if (data.signUrl) {
+      // הצג קישור שאפשר להעתיק
+      const copy = confirm(data.message + '\n\nקישור לחתימה:\n' + data.signUrl + '\n\nלהעתיק את הקישור?');
+      if (copy) {
+        navigator.clipboard.writeText(data.signUrl).then(() => alert('הקישור הועתק!'));
+      }
+    } else {
+      alert(data.message);
+    }
+  }
   else { alert(data.error); }
 }
 
