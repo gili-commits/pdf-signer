@@ -97,21 +97,12 @@ router.post('/:docId/send', requireAuth, async (req, res) => {
       .eq('id', req.params.docId);
     console.log('[send] step 5: status updated to sent');
 
-    // שלח מייל
+    // יצירת קישור חתימה
     const signUrl = `${process.env.BASE_URL}/sign/${request.token}`;
-    console.log('[send] step 6: sending email to', recipient_email, 'url:', signUrl);
-
-    let emailSent = false;
-    try {
-      await sendSignatureRequest(recipient_email, recipient_name, signUrl);
-      emailSent = true;
-      console.log('[send] email sent successfully!');
-    } catch (emailErr) {
-      console.error('[send] email failed (continuing):', emailErr.message);
-    }
+    console.log('[send] sign URL created:', signUrl);
 
     res.json({
-      message: emailSent ? 'בקשת החתימה נשלחה בהצלחה' : 'הבקשה נוצרה — המייל לא נשלח, שתף את הקישור ידנית',
+      message: 'קישור החתימה נוצר בהצלחה',
       requestId: request.id,
       signUrl
     });

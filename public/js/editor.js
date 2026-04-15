@@ -398,17 +398,33 @@ async function sendForSignature() {
   const data = await res.json();
   if (res.ok) {
     closeSendModal();
-    if (data.signUrl) {
-      // הצג קישור שאפשר להעתיק
-      const copy = confirm(data.message + '\n\nקישור לחתימה:\n' + data.signUrl + '\n\nלהעתיק את הקישור?');
-      if (copy) {
-        navigator.clipboard.writeText(data.signUrl).then(() => alert('הקישור הועתק!'));
-      }
-    } else {
-      alert(data.message);
-    }
+    showLinkModal(data.signUrl, name);
   }
   else { alert(data.error); }
+}
+
+// === הצגת קישור חתימה ===
+function showLinkModal(url, name) {
+  document.getElementById('link-recipient').textContent = name;
+  document.getElementById('link-url').value = url;
+  document.getElementById('link-modal').classList.add('active');
+}
+function closeLinkModal() { document.getElementById('link-modal').classList.remove('active'); }
+function copyLink() {
+  const input = document.getElementById('link-url');
+  input.select();
+  navigator.clipboard.writeText(input.value).then(() => {
+    const btn = document.getElementById('btn-copy-link');
+    btn.textContent = 'הועתק!';
+    btn.style.background = '#16a34a';
+    setTimeout(() => { btn.textContent = 'העתק קישור'; btn.style.background = '#2563eb'; }, 2000);
+  });
+}
+function shareWhatsApp() {
+  const url = document.getElementById('link-url').value;
+  const name = document.getElementById('link-recipient').textContent;
+  const text = encodeURIComponent(`שלום ${name}, יש מסמך שממתין לחתימתך:\n${url}`);
+  window.open(`https://wa.me/?text=${text}`, '_blank');
 }
 
 // === סנכרון סרגל כלים ===
