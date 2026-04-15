@@ -6,6 +6,12 @@ const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Trust proxy — נדרש עבור Render/ngrok כדי ש-secure cookies יעבדו
+const isProduction = process.env.NODE_ENV === 'production' || process.env.BASE_URL?.startsWith('https');
+if (isProduction) {
+  app.set('trust proxy', 1);
+}
+
 // Middleware — גוף בקשה
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true }));
@@ -24,8 +30,9 @@ app.use(session({
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: process.env.NODE_ENV === 'production',
+    secure: isProduction,
     httpOnly: true,
+    sameSite: isProduction ? 'none' : 'lax',
     maxAge: 1000 * 60 * 60 * 24 // 24 שעות
   }
 }));
