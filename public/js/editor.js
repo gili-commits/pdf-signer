@@ -345,19 +345,8 @@ async function downloadPdf() {
   URL.revokeObjectURL(a.href);
 }
 
-// === שליחה לחתימה ===
-function openSendModal() {
-  console.log('openSendModal called');
-  document.getElementById('send-modal').classList.add('active');
-}
-function closeSendModal() { document.getElementById('send-modal').classList.remove('active'); }
-
-async function sendForSignature() {
-  console.log('sendForSignature called');
-  const name = document.getElementById('recipient-name').value.trim();
-  const email = document.getElementById('recipient-email').value.trim();
-  if (!name || !email) { alert('יש למלא שם ואימייל'); return; }
-
+// === יצירת קישור חתימה ===
+async function createSignLink() {
   // אסוף שדות חתימה (sigField) מכל העמודים
   saveCurrentPageObjects();
   const sigFields = [];
@@ -379,8 +368,6 @@ async function sendForSignature() {
     });
   }
 
-  console.log('sigFields collected:', sigFields.length, sigFields);
-
   if (sigFields.length === 0) {
     alert('יש להוסיף לפחות שדה חתימה אחד (כפתור "✎ שדה חתימה")');
     return;
@@ -390,15 +377,14 @@ async function sendForSignature() {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      recipient_name: name,
-      recipient_email: email,
+      recipient_name: 'נמען',
+      recipient_email: 'pending@sign.link',
       signature_fields: sigFields
     })
   });
   const data = await res.json();
   if (res.ok) {
-    closeSendModal();
-    showLinkModal(data.signUrl, name);
+    showLinkModal(data.signUrl, 'הנמען');
   }
   else { alert(data.error); }
 }

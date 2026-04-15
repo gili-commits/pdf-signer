@@ -81,7 +81,7 @@
     <div class="header-btns">
       <button class="btn btn-white" onclick="location.href='/'">חזרה</button>
       <button class="btn btn-warning" onclick="downloadPdf()">הורד PDF</button>
-      <button class="btn btn-success" onclick="openSendModal()">שלח לחתימה</button>
+      <button class="btn btn-success" onclick="createSignLink()">🔗 צור קישור חתימה</button>
     </div>
   </header>
 
@@ -114,22 +114,6 @@
   <div id="pdf-container">
     <canvas id="pdf-canvas"></canvas>
     <canvas id="fabric-canvas"></canvas>
-  </div>
-
-  <!-- Modal שליחה -->
-  <div class="modal-overlay" id="send-modal">
-    <div class="modal" style="width:380px;">
-      <h2>שליחה לחתימה</h2>
-      <p style="font-size:13px; color:#6b7280; margin-bottom:12px;">
-        סמן שדה חתימה על המסמך לפני השליחה (כפתור "✎ שדה חתימה")
-      </p>
-      <input type="text" id="recipient-name" placeholder="שם הנמען" />
-      <input type="email" id="recipient-email" placeholder="אימייל הנמען" />
-      <div class="modal-actions">
-        <button class="btn btn-success" onclick="sendForSignature()">שלח</button>
-        <button class="btn btn-secondary" onclick="closeSendModal()">ביטול</button>
-      </div>
-    </div>
   </div>
 
   <!-- Modal קישור חתימה -->
@@ -174,6 +158,6 @@
     </div>
   </div>
 
-  <script src="/js/editor.js?v=4"></script>
+  <script src="/js/editor.js?v=5"></script>
 </body>
 </html>
