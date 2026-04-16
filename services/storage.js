@@ -25,7 +25,8 @@ async function downloadPdf(storagePath) {
   return Buffer.from(arrayBuffer);
 }
 
-async function getSignedUrl(storagePath, expiresInSeconds = 3600) {
+async function getSignedUrl(storagePath, expiresInSeconds = 60 * 60 * 24 * 7) {
+  // ברירת מחדל: שבוע (604800 שניות)
   const { data, error } = await supabase.storage
     .from(BUCKET)
     .createSignedUrl(storagePath, expiresInSeconds);

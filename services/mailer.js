@@ -46,7 +46,7 @@ async function sendSignedNotification(ownerEmail, documentName, downloadUrl) {
             הורדת המסמך החתום
           </a>
         </p>
-        <p style="color:#666; font-size:14px;">הקישור תקף ל-60 דקות.</p>
+        <p style="color:#666; font-size:14px;">הקישור תקף לשבוע.</p>
       </div>
     `
   });
