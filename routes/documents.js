@@ -283,25 +283,55 @@ router.delete('/:id', requireAuth, async (req, res) => {
     }
 
     // מחיקה מ-Storage — מקורי + חתום (אם קיים)
-    const pathsToDelete = [data.storage_path];
-    const signedPath = data.storage_path.replace('.pdf', '_signed.pdf');
-    pathsToDelete.push(signedPath);
+    const pathsToDelete = [data.storage_path, data.storage_path.replace('.pdf', '_signed.pdf')];
+    const { error: storageError } = await supabase.storage.from('pdfs').remove(pathsToDelete);
+    if (storageError) console.error('[delete] storage error (continuing):', storageError.message);
 
-    await supabase.storage.from('pdfs').remove(pathsToDelete);
-    // לא נכשל גם אם הקבצים לא קיימים
+    // מחיקת signatures לפי request_ids
+    const { data: requests } = await supabase
+      .from('signature_requests')
+      .select('id')
+      .eq('document_id', req.params.id);
 
-    // מחיקה מ-DB (cascade ימחק גם signature_fields ו-signature_requests)
+    if (requests && requests.length > 0) {
+      const requestIds = requests.map(r => r.id);
+      const { error: sigErr } = await supabase
+        .from('signatures')
+        .delete()
+        .in('request_id', requestIds);
+      if (sigErr) console.error('[delete] signatures error:', sigErr.message);
+    }
+
+    // מחיקת signature_requests
+    const { error: reqErr } = await supabase
+      .from('signature_requests')
+      .delete()
+      .eq('document_id', req.params.id);
+    if (reqErr) console.error('[delete] requests error:', reqErr.message);
+
+    // מחיקת signature_fields
+    const { error: fieldsErr } = await supabase
+      .from('signature_fields')
+      .delete()
+      .eq('document_id', req.params.id);
+    if (fieldsErr) console.error('[delete] fields error:', fieldsErr.message);
+
+    // מחיקת המסמך עצמו
     const { error: dbError } = await supabase
       .from('documents')
       .delete()
-      .eq('id', req.params.id);
+      .eq('id', req.params.id)
+      .eq('user_id', req.session.userId);
 
-    if (dbError) throw dbError;
+    if (dbError) {
+      console.error('[delete] document DB error:', dbError.message);
+      throw dbError;
+    }
 
     res.json({ message: 'המסמך נמחק בהצלחה' });
   } catch (err) {
-    console.error('שגיאה במחיקת מסמך:', err.message);
-    res.status(500).json({ error: 'שגיאה במחיקת המסמך' });
+    console.error('[delete] FAILED:', err.message);
+    res.status(500).json({ error: 'שגיאה במחיקת המסמך: ' + err.message });
   }
 });
 
