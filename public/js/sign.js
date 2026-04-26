@@ -41,6 +41,13 @@ async function init() {
 
     // גלול אוטומטית לחתימה אחרי שנייה
     setTimeout(() => scrollToSign(), 1000);
+
+    // הסתר כפתור צף כשאזור החתימה נראה
+    const observer = new IntersectionObserver((entries) => {
+      const fab = document.getElementById('fab-sign');
+      fab.style.display = entries[0].isIntersecting ? 'none' : 'block';
+    }, { threshold: 0.3 });
+    observer.observe(document.getElementById('signature-section'));
   } catch (err) {
     showError('שגיאה בטעינת המסמך');
   }
@@ -82,33 +89,7 @@ async function renderPage(pageNumber) {
 }
 
 function renderFieldOverlays(canvasWidth, canvasHeight) {
-  // הסר overlays קיימים
-  document.querySelectorAll('.field-overlay').forEach(el => el.remove());
-
-  const container = document.getElementById('pdf-container');
-  const pageFields = signData.fields.filter(f => f.page === currentPage);
-
-  // חשב scale — היחס בין גודל ה-canvas לגודל המקורי של העמוד
-  const pageInfo = signData.document.pages[currentPage - 1];
-  const scale = canvasWidth / pageInfo.originalWidth;
-
-  pageFields.forEach(field => {
-    const overlay = document.createElement('div');
-    overlay.className = 'field-overlay';
-    overlay.style.left = (field.x * scale) + 'px';
-    overlay.style.top = (field.y * scale) + 'px';
-    overlay.style.width = (field.width * scale) + 'px';
-    overlay.style.height = (field.height * scale) + 'px';
-
-    const labels = { signature: 'חתום כאן', text: 'טקסט', date: 'תאריך' };
-    overlay.textContent = labels[field.field_type] || 'חתום כאן';
-
-    overlay.addEventListener('click', () => {
-      document.getElementById('signature-section').scrollIntoView({ behavior: 'smooth' });
-    });
-
-    container.appendChild(overlay);
-  });
+  // אין overlays — אזור החתימה ברור למטה
 }
 
 // === ניווט עמודים ===
