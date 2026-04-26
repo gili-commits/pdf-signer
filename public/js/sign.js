@@ -78,12 +78,20 @@ async function renderPage(pageNumber) {
     img.src = `/api/sign/${token}/page/${pageNumber}`;
   });
 
-  // התאם לרוחב המסך במובייל
-  const maxWidth = document.getElementById('pdf-container').clientWidth || window.innerWidth;
-  const scale = Math.min(1, maxWidth / img.width);
-  pdfCanvas.width = img.width * scale;
-  pdfCanvas.height = img.height * scale;
-  ctx.drawImage(img, 0, 0, pdfCanvas.width, pdfCanvas.height);
+  // רזולוציה מלאה — CSS מצמצם (שמירה על חדות)
+  pdfCanvas.width = img.width;
+  pdfCanvas.height = img.height;
+  ctx.drawImage(img, 0, 0);
+
+  // כיווץ ויזואלי בלבד דרך CSS
+  const maxWidth = document.getElementById('pdf-container').clientWidth || window.innerWidth - 32;
+  if (img.width > maxWidth) {
+    pdfCanvas.style.width = maxWidth + 'px';
+    pdfCanvas.style.height = 'auto';
+  } else {
+    pdfCanvas.style.width = '';
+    pdfCanvas.style.height = '';
+  }
 
   document.getElementById('page-num').textContent = pageNumber;
 
