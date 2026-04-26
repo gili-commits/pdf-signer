@@ -33,10 +33,21 @@ async function init() {
     document.getElementById('loading').style.display = 'none';
     document.getElementById('main-content').style.display = 'block';
 
+    // הצג כרזה וכפתור צף
+    document.getElementById('scroll-banner').style.display = 'block';
+    document.getElementById('fab-sign').style.display = 'block';
+
     await renderPage(currentPage);
+
+    // גלול אוטומטית לחתימה אחרי שנייה
+    setTimeout(() => scrollToSign(), 1000);
   } catch (err) {
     showError('שגיאה בטעינת המסמך');
   }
+}
+
+function scrollToSign() {
+  document.getElementById('signature-section').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function showError(msg) {
@@ -202,6 +213,8 @@ async function submitSignature() {
 
     if (res.ok) {
       document.getElementById('main-content').style.display = 'none';
+      document.getElementById('scroll-banner').style.display = 'none';
+      document.getElementById('fab-sign').style.display = 'none';
       document.getElementById('success-msg').style.display = 'block';
     } else {
       alert(data.error);
