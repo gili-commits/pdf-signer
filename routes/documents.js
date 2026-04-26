@@ -282,12 +282,13 @@ router.delete('/:id', requireAuth, async (req, res) => {
       return res.status(404).json({ error: 'מסמך לא נמצא' });
     }
 
-    // מחיקה מ-Storage
-    const { error: storageError } = await supabase.storage
-      .from('pdfs')
-      .remove([data.storage_path]);
+    // מחיקה מ-Storage — מקורי + חתום (אם קיים)
+    const pathsToDelete = [data.storage_path];
+    const signedPath = data.storage_path.replace('.pdf', '_signed.pdf');
+    pathsToDelete.push(signedPath);
 
-    if (storageError) throw storageError;
+    await supabase.storage.from('pdfs').remove(pathsToDelete);
+    // לא נכשל גם אם הקבצים לא קיימים
 
     // מחיקה מ-DB (cascade ימחק גם signature_fields ו-signature_requests)
     const { error: dbError } = await supabase
