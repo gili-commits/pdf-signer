@@ -259,8 +259,9 @@ router.post('/:id/download', requireAuth, async (req, res) => {
 
     const editedPdf = await pdfDoc.save();
 
+    const encodedName = encodeURIComponent(data.filename.replace('.pdf', '_edited.pdf'));
     res.set('Content-Type', 'application/pdf');
-    res.set('Content-Disposition', `attachment; filename="${data.filename.replace('.pdf', '_edited.pdf')}"`);
+    res.set('Content-Disposition', `attachment; filename="edited.pdf"; filename*=UTF-8''${encodedName}`);
     res.send(Buffer.from(editedPdf));
   } catch (err) {
     console.error('שגיאה בהורדת PDF:', err.message);
