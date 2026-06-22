@@ -107,7 +107,11 @@
 
   <div class="page-nav">
     <button class="btn btn-secondary" onclick="prevPage()">→ הקודם</button>
-    <span>עמוד <strong id="page-num">1</strong> מתוך <strong id="page-count">1</strong></span>
+    <span>עמוד
+      <input type="number" id="page-input" value="1" min="1"
+        style="width:56px; padding:5px 6px; border:1px solid #d1d5db; border-radius:6px; font-size:14px; text-align:center;"
+        onchange="goToPageInput()" onkeydown="if(event.key==='Enter'){event.preventDefault();goToPageInput();}" />
+      מתוך <strong id="page-count">1</strong></span>
     <button class="btn btn-secondary" onclick="nextPage()">הבא ←</button>
   </div>
 
@@ -158,6 +162,6 @@
     </div>
   </div>
 
-  <script src="/js/editor.js?v=5"></script>
+  <script src="/js/editor.js?v=7"></script>
 </body>
 </html>

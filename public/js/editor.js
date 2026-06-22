@@ -24,6 +24,7 @@ async function init() {
     pagesInfo = await pagesRes.json();
     totalPages = pagesInfo.totalPages;
     document.getElementById('page-count').textContent = totalPages;
+    document.getElementById('page-input').max = totalPages;
 
     fabricCanvas = new fabric.Canvas('fabric-canvas', { selection: true });
     console.log('fabricCanvas created');
@@ -128,7 +129,7 @@ async function renderPage(pageNumber) {
   fabricCanvas.clear();
 
   currentPage = pageNumber;
-  document.getElementById('page-num').textContent = pageNumber;
+  document.getElementById('page-input').value = pageNumber;
 
   restorePageObjects(pageNumber);
 }
@@ -224,6 +225,26 @@ function addSignedImage(x, y, w, h, dataUrl) {
   });
 }
 
+// === מצב מיקום חתימה — לחיצה על המסמך מציבה את החתימה ===
+let pendingSignature = null;
+
+function startSignaturePlacement(dataUrl) {
+  pendingSignature = dataUrl;
+  fabricCanvas.defaultCursor = 'crosshair';
+  fabricCanvas.discardActiveObject();
+  fabricCanvas.renderAll();
+  fabricCanvas.once('mouse:down', placePendingSignature);
+}
+
+function placePendingSignature(opt) {
+  if (!pendingSignature) return;
+  const p = fabricCanvas.getPointer(opt.e);
+  const w = 200, h = 60;
+  addSignedImage(p.x - w / 2, p.y - h / 2, w, h, pendingSignature);
+  pendingSignature = null;
+  fabricCanvas.defaultCursor = 'default';
+}
+
 // === Signature Pad ===
 function initSigPad() {
   sigPadCanvas = document.getElementById('sig-modal-canvas');
@@ -273,8 +294,8 @@ function confirmSignature() {
     addSignedImage(x, y, w, h, dataUrl);
     sigTargetField = null;
   } else {
-    // חתימה חופשית (כפתור "חתום בעצמך")
-    addSignedImage(100, 100, 200, 60, dataUrl);
+    // חתימה חופשית (כפתור "חתום בעצמך") — מצב מיקום: לחיצה על המסמך תציב את החתימה
+    startSignaturePlacement(dataUrl);
   }
   closeSigModal();
 }
@@ -282,6 +303,15 @@ function confirmSignature() {
 // === ניווט ===
 async function prevPage() { if (currentPage <= 1) return; await renderPage(currentPage - 1); }
 async function nextPage() { if (currentPage >= totalPages) return; await renderPage(currentPage + 1); }
+
+async function goToPageInput() {
+  const input = document.getElementById('page-input');
+  let target = parseInt(input.value);
+  if (isNaN(target)) { input.value = currentPage; return; }
+  target = Math.max(1, Math.min(totalPages, target));
+  if (target === currentPage) { input.value = currentPage; return; }
+  await renderPage(target);
+}
 
 // === הורדת PDF ===
 async function downloadPdf() {
