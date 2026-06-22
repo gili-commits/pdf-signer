@@ -13,6 +13,7 @@ let pageObjects = {}; // שמירת אובייקטים בין עמודים
 // Signature pad
 let sigPadCanvas, sigPadCtx, sigDrawing = false, sigHasDrawn = false;
 let sigTargetField = null; // שדה חתימה שעליו לחצו דאבל-קליק
+let signAllMode = false;    // מצב "חתום על כל השדות" — חתימה אחת ממלאת את כל השדות בכל העמודים
 
 // === אתחול ===
 async function init() {
@@ -40,6 +41,7 @@ async function init() {
     fabricCanvas.on('mouse:dblclick', (opt) => {
       const target = opt.target;
       if (target && target.objType === 'sigField') {
+        signAllMode = false;
         sigTargetField = target;
         openSigModal();
       }
@@ -272,11 +274,56 @@ function sigMove(e) { if (!sigDrawing) return; sigPadCtx.lineTo(e.offsetX, e.off
 function sigStop() { sigDrawing = false; }
 
 function openSigModal() {
-  // אם נקרא מכפתור "חתום בעצמך" (לא מדאבל-קליק על שדה) — אפס
-  if (!sigTargetField) sigTargetField = null;
   clearSigPad();
   document.getElementById('sig-modal').classList.add('active');
   loadSavedSignatures();
+}
+
+// כפתור "חתום בעצמך" — חתימה חופשית במיקום בודד
+function openSelfSign() {
+  signAllMode = false;
+  sigTargetField = null;
+  openSigModal();
+}
+
+// כפתור "חתום על כל השדות" — חתימה אחת תמלא את כל שדות החתימה בכל העמודים
+function openSignAllModal() {
+  saveCurrentPageObjects();
+  let count = 0;
+  for (const page of Object.keys(pageObjects)) {
+    count += pageObjects[page].filter(o => o.type === 'sigField').length;
+  }
+  if (count === 0) {
+    alert('אין שדות חתימה. סמן מיקומים עם "✎ שדה חתימה" (אפשר בכמה עמודים) ואז חתום פעם אחת');
+    return;
+  }
+  signAllMode = true;
+  sigTargetField = null;
+  openSigModal();
+}
+
+// מילוי כל שדות החתימה (בכל העמודים) באותה חתימה
+function applySignatureToAllFields(dataUrl) {
+  saveCurrentPageObjects();
+  let count = 0;
+  for (const page of Object.keys(pageObjects)) {
+    pageObjects[page] = pageObjects[page].map(obj => {
+      if (obj.type !== 'sigField') return obj;
+      const d = obj.data;
+      const w = (d.width || 200) * (d.scaleX || 1);
+      const h = (d.height || 60) * (d.scaleY || 1);
+      count++;
+      return {
+        type: 'signature',
+        sigData: dataUrl,
+        data: { left: d.left, top: d.top, width: w, height: h, scaleX: 1, scaleY: 1 }
+      };
+    });
+  }
+  // רענון העמוד הנוכחי כדי לשקף את החתימות שהוחלפו
+  fabricCanvas.clear();
+  restorePageObjects(currentPage);
+  return count;
 }
 
 // === חתימות שמורות ===
@@ -374,6 +421,13 @@ function confirmSignature() {
 
 // משתמש בחתימה (מצוירת או שמורה) — או ממלא שדה חתימה, או נכנס למצב מיקום
 function useSignature(dataUrl) {
+  if (signAllMode) {
+    signAllMode = false;
+    const n = applySignatureToAllFields(dataUrl);
+    closeSigModal();
+    if (n === 0) alert('לא נמצאו שדות חתימה');
+    return;
+  }
   if (sigTargetField) {
     // החלף את שדה החתימה בתמונת החתימה
     const x = sigTargetField.left;
