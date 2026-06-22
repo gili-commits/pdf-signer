@@ -276,6 +276,92 @@ function openSigModal() {
   if (!sigTargetField) sigTargetField = null;
   clearSigPad();
   document.getElementById('sig-modal').classList.add('active');
+  loadSavedSignatures();
+}
+
+// === חתימות שמורות ===
+async function loadSavedSignatures() {
+  try {
+    const res = await fetch('/api/signatures');
+    if (!res.ok) return;
+    const sigs = await res.json();
+    renderSavedSignatures(sigs);
+  } catch (err) {
+    console.error('שגיאה בטעינת חתימות שמורות:', err);
+  }
+}
+
+function renderSavedSignatures(sigs) {
+  const section = document.getElementById('saved-sigs-section');
+  const list = document.getElementById('saved-sigs-list');
+  list.innerHTML = '';
+
+  if (!sigs || sigs.length === 0) {
+    section.style.display = 'none';
+    return;
+  }
+  section.style.display = 'block';
+
+  sigs.forEach(sig => {
+    const item = document.createElement('div');
+    item.style.cssText = 'position:relative; border:1px solid #d1d5db; border-radius:8px; padding:6px; width:130px; text-align:center; background:#fff;';
+
+    const img = document.createElement('img');
+    img.src = sig.signature_data;
+    img.title = 'לחץ כדי להשתמש בחתימה';
+    img.style.cssText = 'width:100%; height:50px; object-fit:contain; cursor:pointer;';
+    img.onclick = () => useSignature(sig.signature_data);
+
+    const label = document.createElement('div');
+    label.textContent = sig.name;
+    label.style.cssText = 'font-size:12px; color:#6b7280; margin-top:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
+
+    const del = document.createElement('button');
+    del.textContent = '×';
+    del.title = 'מחק חתימה';
+    del.style.cssText = 'position:absolute; top:-8px; left:-8px; width:22px; height:22px; border-radius:50%; border:none; background:#dc2626; color:#fff; cursor:pointer; font-size:14px; line-height:1;';
+    del.onclick = (e) => { e.stopPropagation(); deleteSavedSignature(sig.id); };
+
+    item.appendChild(del);
+    item.appendChild(img);
+    item.appendChild(label);
+    list.appendChild(item);
+  });
+}
+
+async function saveCurrentSignature() {
+  if (!sigHasDrawn) { alert('יש לצייר חתימה לפני שמירה'); return; }
+  const name = prompt('שם לחתימה (למשל: שלי / של אשתי):');
+  if (!name || !name.trim()) return;
+  const dataUrl = sigPadCanvas.toDataURL('image/png');
+
+  try {
+    const res = await fetch('/api/signatures', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name.trim(), signature_data: dataUrl })
+    });
+    if (!res.ok) {
+      const data = await res.json();
+      alert(data.error || 'שגיאה בשמירת החתימה');
+      return;
+    }
+    await loadSavedSignatures();
+  } catch (err) {
+    console.error('שגיאה בשמירת חתימה:', err);
+    alert('שגיאה בשמירת החתימה');
+  }
+}
+
+async function deleteSavedSignature(id) {
+  if (!confirm('למחוק את החתימה השמורה?')) return;
+  try {
+    const res = await fetch(`/api/signatures/${id}`, { method: 'DELETE' });
+    if (!res.ok) { alert('שגיאה במחיקת החתימה'); return; }
+    await loadSavedSignatures();
+  } catch (err) {
+    console.error('שגיאה במחיקת חתימה:', err);
+  }
 }
 function closeSigModal() { document.getElementById('sig-modal').classList.remove('active'); }
 function clearSigPad() { sigPadCtx.clearRect(0, 0, sigPadCanvas.width, sigPadCanvas.height); sigHasDrawn = false; }
@@ -283,7 +369,11 @@ function clearSigPad() { sigPadCtx.clearRect(0, 0, sigPadCanvas.width, sigPadCan
 function confirmSignature() {
   if (!sigHasDrawn) { alert('יש לצייר חתימה'); return; }
   const dataUrl = sigPadCanvas.toDataURL('image/png');
+  useSignature(dataUrl);
+}
 
+// משתמש בחתימה (מצוירת או שמורה) — או ממלא שדה חתימה, או נכנס למצב מיקום
+function useSignature(dataUrl) {
   if (sigTargetField) {
     // החלף את שדה החתימה בתמונת החתימה
     const x = sigTargetField.left;

@@ -152,16 +152,24 @@
   <!-- Modal חתימה עצמית -->
   <div class="modal-overlay" id="sig-modal">
     <div class="modal" style="width:540px;">
+      <!-- חתימות שמורות -->
+      <div id="saved-sigs-section" style="display:none; margin-bottom:16px;">
+        <h2 style="font-size:16px; margin-bottom:10px;">חתימות שמורות</h2>
+        <div id="saved-sigs-list" style="display:flex; flex-wrap:wrap; gap:10px;"></div>
+        <div style="border-top:1px solid #e5e7eb; margin:16px 0 4px;"></div>
+      </div>
+
       <h2>צייר חתימה</h2>
       <canvas id="sig-modal-canvas" width="490" height="180"></canvas>
       <div class="modal-actions">
         <button class="btn btn-success" onclick="confirmSignature()">אישור</button>
+        <button class="btn btn-warning" onclick="saveCurrentSignature()">💾 שמור חתימה</button>
         <button class="btn btn-secondary" onclick="clearSigPad()">נקה</button>
         <button class="btn btn-secondary" onclick="closeSigModal()">ביטול</button>
       </div>
     </div>
   </div>
 
-  <script src="/js/editor.js?v=7"></script>
+  <script src="/js/editor.js?v=8"></script>
 </body>
 </html>

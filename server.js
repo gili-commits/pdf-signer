@@ -43,6 +43,7 @@ app.use('/api/documents', require('./routes/documents'));
 app.use('/api/editor', require('./routes/editor'));
 app.use('/api/requests', require('./routes/requests'));
 app.use('/api/sign', require('./routes/sign'));
+app.use('/api/signatures', require('./routes/signatures'));
 
 // דף חתימה ציבורי — מגיש את sign.html לכל token
 app.get('/sign/:token', (req, res) => {
