@@ -9,6 +9,7 @@ let totalPages = 1;
 let fabricCanvas = null;
 let pagesInfo = null;
 let pageObjects = {}; // שמירת אובייקטים בין עמודים
+let deletedPages = new Set(); // עמודים שסומנו למחיקה (יוסרו בהורדה)
 
 // Signature pad
 let sigPadCanvas, sigPadCtx, sigDrawing = false, sigHasDrawn = false;
@@ -139,6 +140,7 @@ async function renderPage(pageNumber) {
 // === שמירה ושחזור אובייקטים בין עמודים ===
 function saveCurrentPageObjects() {
   if (!fabricCanvas) return;
+  if (deletedPages.has(currentPage)) return;
   const objects = [];
   fabricCanvas.getObjects().forEach(obj => {
     objects.push({
@@ -445,16 +447,56 @@ function useSignature(dataUrl) {
 }
 
 // === ניווט ===
-async function prevPage() { if (currentPage <= 1) return; await renderPage(currentPage - 1); }
-async function nextPage() { if (currentPage >= totalPages) return; await renderPage(currentPage + 1); }
+async function prevPage() {
+  let p = currentPage - 1;
+  while (p >= 1 && deletedPages.has(p)) p--;
+  if (p < 1) return;
+  await renderPage(p);
+}
+async function nextPage() {
+  let p = currentPage + 1;
+  while (p <= totalPages && deletedPages.has(p)) p++;
+  if (p > totalPages) return;
+  await renderPage(p);
+}
 
 async function goToPageInput() {
   const input = document.getElementById('page-input');
   let target = parseInt(input.value);
   if (isNaN(target)) { input.value = currentPage; return; }
   target = Math.max(1, Math.min(totalPages, target));
+  if (deletedPages.has(target)) { alert('עמוד זה נמחק'); input.value = currentPage; return; }
   if (target === currentPage) { input.value = currentPage; return; }
   await renderPage(target);
+}
+
+// === מחיקת עמוד ===
+async function deletePage() {
+  const remaining = totalPages - deletedPages.size;
+  if (remaining <= 1) { alert('לא ניתן למחוק את העמוד האחרון שנותר'); return; }
+  if (!confirm(`למחוק את עמוד ${currentPage}? (העמוד יוסר מה-PDF בהורדה)`)) return;
+
+  deletedPages.add(currentPage);
+  delete pageObjects[currentPage];
+
+  // עבור לעמוד הזמין הבא, אחרת הקודם
+  let p = currentPage + 1;
+  while (p <= totalPages && deletedPages.has(p)) p++;
+  if (p > totalPages) {
+    p = currentPage - 1;
+    while (p >= 1 && deletedPages.has(p)) p--;
+  }
+  await renderPage(p);
+  updateDeletedInfo();
+}
+
+function updateDeletedInfo() {
+  const el = document.getElementById('deleted-info');
+  if (!el) return;
+  const remaining = totalPages - deletedPages.size;
+  el.textContent = deletedPages.size > 0
+    ? `(${deletedPages.size} עמודים יימחקו · ${remaining} יישארו)`
+    : '';
 }
 
 // === הורדת PDF ===
@@ -464,6 +506,7 @@ async function downloadPdf() {
   const allAnnotations = {};
 
   for (const [page, objects] of Object.entries(pageObjects)) {
+    if (deletedPages.has(parseInt(page))) continue;
     if (objects.length === 0) continue;
     const info = pagesInfo.pages[parseInt(page) - 1];
     const scaleRatio = info.originalWidth / info.width;
@@ -506,7 +549,7 @@ async function downloadPdf() {
   const res = await fetch(`/api/documents/${docId}/download`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ annotations: allAnnotations })
+    body: JSON.stringify({ annotations: allAnnotations, deletedPages: [...deletedPages] })
   });
 
   if (!res.ok) { alert('שגיאה בהורדת PDF'); return; }

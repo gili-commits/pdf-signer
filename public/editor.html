@@ -114,6 +114,8 @@
         onchange="goToPageInput()" onkeydown="if(event.key==='Enter'){event.preventDefault();goToPageInput();}" />
       מתוך <strong id="page-count">1</strong></span>
     <button class="btn btn-secondary" onclick="nextPage()">הבא ←</button>
+    <button class="btn btn-danger" onclick="deletePage()" style="padding:6px 12px;">🗑 מחק עמוד</button>
+    <span id="deleted-info" style="color:#dc2626; font-size:13px;"></span>
   </div>
 
   <div id="pdf-container">
@@ -171,6 +173,6 @@
     </div>
   </div>
 
-  <script src="/js/editor.js?v=9"></script>
+  <script src="/js/editor.js?v=10"></script>
 </body>
 </html>

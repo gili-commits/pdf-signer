@@ -187,7 +187,7 @@ router.post('/:id/download', requireAuth, async (req, res) => {
     const pdfDoc = await PDFDocument.load(pdfBuffer);
     pdfDoc.registerFontkit(fontkit);
     const pages = pdfDoc.getPages();
-    const { annotations } = req.body;
+    const { annotations, deletedPages } = req.body;
 
     // טען פונט עברי
     let hebrewFont = null;
@@ -253,6 +253,20 @@ router.post('/:id/download', requireAuth, async (req, res) => {
 
             page.drawText(item.text, drawOptions);
           }
+        }
+      }
+    }
+
+    // הסרת עמודים שסומנו למחיקה — מהאינדקס הגבוה לנמוך כדי לא להזיז אינדקסים
+    if (Array.isArray(deletedPages) && deletedPages.length > 0) {
+      const indices = deletedPages
+        .map(n => parseInt(n) - 1)
+        .filter(i => i >= 0 && i < pdfDoc.getPageCount())
+        .sort((a, b) => b - a);
+      // לא למחוק את כל העמודים — להשאיר לפחות אחד
+      if (indices.length < pdfDoc.getPageCount()) {
+        for (const idx of indices) {
+          pdfDoc.removePage(idx);
         }
       }
     }
