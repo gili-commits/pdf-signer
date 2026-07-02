@@ -185,6 +185,8 @@
       });
     }
 
+    let justMovedIdx = null; // הכרטיס שזז לאחרונה — יודגש
+
     function renderImageList() {
       const list = document.getElementById('image-list');
       const enhance = document.getElementById('enhance-toggle').checked;
@@ -192,40 +194,60 @@
 
       selectedImages.forEach((item, idx) => {
         const card = document.createElement('div');
-        card.style.cssText = 'position:relative; border:1px solid #d1d5db; border-radius:8px; padding:6px; width:120px; background:#fff;';
+        const highlighted = idx === justMovedIdx;
+        card.style.cssText =
+          'position:relative; border:2px solid ' + (highlighted ? '#2563eb' : '#d1d5db') +
+          '; border-radius:10px; padding:10px; width:230px; background:#fff;' +
+          ' box-shadow:' + (highlighted ? '0 0 0 3px rgba(37,99,235,0.25)' : '0 1px 4px rgba(0,0,0,0.08)') +
+          '; transition:border-color .3s, box-shadow .3s;';
+
+        // תג מספר עמוד בפינה
+        const badge = document.createElement('div');
+        badge.textContent = idx + 1;
+        badge.style.cssText = 'position:absolute; top:-12px; right:-12px; width:32px; height:32px; border-radius:50%;' +
+          ' background:#2563eb; color:#fff; font-weight:bold; font-size:16px; display:flex; align-items:center;' +
+          ' justify-content:center; box-shadow:0 2px 6px rgba(0,0,0,0.2);';
 
         const canvas = document.createElement('canvas');
-        canvas.style.cssText = 'width:100%; height:150px; object-fit:contain; background:#fff;';
+        canvas.style.cssText = 'width:100%; height:290px; object-fit:contain; background:#fff; border:1px solid #f0f0f0; border-radius:4px;';
         renderThumb(canvas, item.dataUrl, enhance);
 
         const num = document.createElement('div');
         num.textContent = `עמוד ${idx + 1}`;
-        num.style.cssText = 'font-size:12px; color:#374151; text-align:center; margin-top:4px; font-weight:bold;';
+        num.style.cssText = 'font-size:14px; color:#374151; text-align:center; margin-top:8px; font-weight:bold;';
 
         const controls = document.createElement('div');
-        controls.style.cssText = 'display:flex; justify-content:center; gap:6px; margin-top:4px;';
+        controls.style.cssText = 'display:flex; justify-content:center; gap:10px; margin-top:8px;';
         const up = document.createElement('button');
-        up.textContent = '▲'; up.className = 'btn btn-secondary'; up.style.cssText = 'padding:2px 8px; font-size:12px;';
+        up.textContent = '→ אחורה'; up.className = 'btn btn-secondary'; up.style.cssText = 'padding:6px 12px; font-size:13px;';
         up.disabled = idx === 0;
         up.onclick = () => moveImage(idx, -1);
         const down = document.createElement('button');
-        down.textContent = '▼'; down.className = 'btn btn-secondary'; down.style.cssText = 'padding:2px 8px; font-size:12px;';
+        down.textContent = 'קדימה ←'; down.className = 'btn btn-secondary'; down.style.cssText = 'padding:6px 12px; font-size:13px;';
         down.disabled = idx === selectedImages.length - 1;
         down.onclick = () => moveImage(idx, 1);
         controls.appendChild(up);
         controls.appendChild(down);
 
+        card.appendChild(badge);
         card.appendChild(canvas);
         card.appendChild(num);
         card.appendChild(controls);
         list.appendChild(card);
       });
+
+      // הסר את ההדגשה אחרי רגע
+      if (justMovedIdx !== null) {
+        const moved = justMovedIdx;
+        setTimeout(() => { if (justMovedIdx === moved) { justMovedIdx = null; renderImageList(); } }, 700);
+      }
     }
 
     function moveImage(idx, dir) {
       const target = idx + dir;
       if (target < 0 || target >= selectedImages.length) return;
       [selectedImages[idx], selectedImages[target]] = [selectedImages[target], selectedImages[idx]];
+      justMovedIdx = target; // הדגש את הכרטיס במיקומו החדש
       renderImageList();
     }
 
