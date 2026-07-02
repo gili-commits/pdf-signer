@@ -10,17 +10,30 @@ const { PDFDocument, rgb } = require('pdf-lib');
 const fs = require('fs');
 const fontkit = require('fontkit');
 
+const ALLOWED_UPLOAD_TYPES = ['application/pdf', 'image/jpeg', 'image/png'];
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 20 * 1024 * 1024 }, // 20MB
   fileFilter: (req, file, cb) => {
-    if (file.mimetype === 'application/pdf') {
+    if (ALLOWED_UPLOAD_TYPES.includes(file.mimetype)) {
       cb(null, true);
     } else {
-      cb(new Error('יש להעלות קובץ PDF בלבד'));
+      cb(new Error('יש להעלות קובץ PDF או תמונה (JPG/PNG)'));
     }
   }
 });
+
+// המרת תמונה (JPG/PNG) ל-PDF — עמוד יחיד בגודל התמונה
+async function imageToPdf(buffer, mimetype) {
+  const pdfDoc = await PDFDocument.create();
+  const image = mimetype === 'image/png'
+    ? await pdfDoc.embedPng(buffer)
+    : await pdfDoc.embedJpg(buffer);
+  const page = pdfDoc.addPage([image.width, image.height]);
+  page.drawImage(image, { x: 0, y: 0, width: image.width, height: image.height });
+  return Buffer.from(await pdfDoc.save());
+}
 
 // POST /api/documents/upload
 router.post('/upload', requireAuth, upload.single('pdf'), async (req, res) => {
@@ -33,13 +46,21 @@ router.post('/upload', requireAuth, upload.single('pdf'), async (req, res) => {
     const fileId = uuidv4();
     const storagePath = `${userId}/${fileId}.pdf`;
 
-    await uploadPdf(storagePath, req.file.buffer);
+    // אם הועלתה תמונה — המר ל-PDF לפני האחסון
+    let fileBuffer = req.file.buffer;
+    let filename = req.file.originalname;
+    if (req.file.mimetype === 'image/jpeg' || req.file.mimetype === 'image/png') {
+      fileBuffer = await imageToPdf(req.file.buffer, req.file.mimetype);
+      filename = filename.replace(/\.(jpe?g|png)$/i, '') + '.pdf';
+    }
+
+    await uploadPdf(storagePath, fileBuffer);
 
     const { data, error } = await supabase
       .from('documents')
       .insert({
         user_id: userId,
-        filename: req.file.originalname,
+        filename,
         storage_path: storagePath,
         status: 'draft'
       })

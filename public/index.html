@@ -86,8 +86,8 @@
   <div id="dashboard-section">
     <div class="upload-area">
       <h2>העלאת מסמך חדש</h2>
-      <p style="margin:8px 0 16px; color:#6b7280;">בחר קובץ PDF להעלאה</p>
-      <input type="file" id="pdf-file" accept=".pdf" />
+      <p style="margin:8px 0 16px; color:#6b7280;">בחר קובץ PDF או תמונה (JPG/PNG) — תמונה תומר אוטומטית ל-PDF</p>
+      <input type="file" id="pdf-file" accept=".pdf,.jpg,.jpeg,.png" />
       <br />
       <button class="btn btn-primary" onclick="uploadPdf()">העלה מסמך</button>
     </div>
@@ -146,7 +146,7 @@
 
     async function uploadPdf() {
       const fileInput = document.getElementById('pdf-file');
-      if (!fileInput.files[0]) return alert('יש לבחור קובץ PDF');
+      if (!fileInput.files[0]) return alert('יש לבחור קובץ PDF או תמונה');
 
       const formData = new FormData();
       formData.append('pdf', fileInput.files[0]);
