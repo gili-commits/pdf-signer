@@ -24,34 +24,72 @@ const upload = multer({
   }
 });
 
-// המרת תמונה (JPG/PNG) ל-PDF — עמוד יחיד בגודל התמונה
-async function imageToPdf(buffer, mimetype) {
+// המרת תמונות (JPG/PNG) ל-PDF — כל תמונה בעמוד A4 נפרד, ממורכזת עם שוליים
+const A4_WIDTH = 595.28;
+const A4_HEIGHT = 841.89;
+const PAGE_MARGIN = 28; // ~1 ס"מ
+
+async function imagesToPdf(files) {
   const pdfDoc = await PDFDocument.create();
-  const image = mimetype === 'image/png'
-    ? await pdfDoc.embedPng(buffer)
-    : await pdfDoc.embedJpg(buffer);
-  const page = pdfDoc.addPage([image.width, image.height]);
-  page.drawImage(image, { x: 0, y: 0, width: image.width, height: image.height });
+
+  for (const file of files) {
+    const image = file.mimetype === 'image/png'
+      ? await pdfDoc.embedPng(file.buffer)
+      : await pdfDoc.embedJpg(file.buffer);
+
+    const page = pdfDoc.addPage([A4_WIDTH, A4_HEIGHT]);
+    const maxW = A4_WIDTH - PAGE_MARGIN * 2;
+    const maxH = A4_HEIGHT - PAGE_MARGIN * 2;
+
+    // התאמה לגודל העמוד תוך שמירה על יחס
+    const scale = Math.min(maxW / image.width, maxH / image.height);
+    const w = image.width * scale;
+    const h = image.height * scale;
+
+    page.drawImage(image, {
+      x: (A4_WIDTH - w) / 2,
+      y: (A4_HEIGHT - h) / 2,
+      width: w,
+      height: h
+    });
+  }
+
   return Buffer.from(await pdfDoc.save());
 }
 
-// POST /api/documents/upload
-router.post('/upload', requireAuth, upload.single('pdf'), async (req, res) => {
+// POST /api/documents/upload — קובץ PDF יחיד, או תמונה/כמה תמונות שיאוחדו ל-PDF אחד
+router.post('/upload', requireAuth, upload.array('pdf', 20), async (req, res) => {
   try {
-    if (!req.file) {
+    const files = req.files || [];
+    if (files.length === 0) {
       return res.status(400).json({ error: 'לא נבחר קובץ' });
+    }
+
+    const images = files.filter(f => f.mimetype === 'image/jpeg' || f.mimetype === 'image/png');
+    const pdfs = files.filter(f => f.mimetype === 'application/pdf');
+
+    // לא ניתן לערבב PDF עם תמונות, או להעלות כמה קובצי PDF יחד
+    if (pdfs.length > 0 && images.length > 0) {
+      return res.status(400).json({ error: 'יש להעלות או קובץ PDF, או תמונות — לא שילוב' });
+    }
+    if (pdfs.length > 1) {
+      return res.status(400).json({ error: 'ניתן להעלות קובץ PDF אחד בכל פעם' });
     }
 
     const userId = req.session.userId;
     const fileId = uuidv4();
     const storagePath = `${userId}/${fileId}.pdf`;
 
-    // אם הועלתה תמונה — המר ל-PDF לפני האחסון
-    let fileBuffer = req.file.buffer;
-    let filename = req.file.originalname;
-    if (req.file.mimetype === 'image/jpeg' || req.file.mimetype === 'image/png') {
-      fileBuffer = await imageToPdf(req.file.buffer, req.file.mimetype);
-      filename = filename.replace(/\.(jpe?g|png)$/i, '') + '.pdf';
+    let fileBuffer;
+    let filename;
+    if (images.length > 0) {
+      // תמונה אחת או יותר → PDF אחד מרובה עמודים
+      fileBuffer = await imagesToPdf(images);
+      const base = images[0].originalname.replace(/\.(jpe?g|png)$/i, '');
+      filename = images.length > 1 ? `${base} ועוד ${images.length - 1}.pdf` : `${base}.pdf`;
+    } else {
+      fileBuffer = pdfs[0].buffer;
+      filename = pdfs[0].originalname;
     }
 
     await uploadPdf(storagePath, fileBuffer);
