@@ -212,26 +212,25 @@
         canvas.style.cssText = 'width:100%; height:290px; object-fit:contain; background:#fff; border:1px solid #f0f0f0; border-radius:4px;';
         renderThumb(canvas, item.dataUrl, enhance);
 
-        const num = document.createElement('div');
-        num.textContent = `עמוד ${idx + 1}`;
-        num.style.cssText = 'font-size:14px; color:#374151; text-align:center; margin-top:8px; font-weight:bold;';
-
         const controls = document.createElement('div');
-        controls.style.cssText = 'display:flex; justify-content:center; gap:10px; margin-top:8px;';
-        const up = document.createElement('button');
-        up.textContent = '→ אחורה'; up.className = 'btn btn-secondary'; up.style.cssText = 'padding:6px 12px; font-size:13px;';
-        up.disabled = idx === 0;
-        up.onclick = () => moveImage(idx, -1);
-        const down = document.createElement('button');
-        down.textContent = 'קדימה ←'; down.className = 'btn btn-secondary'; down.style.cssText = 'padding:6px 12px; font-size:13px;';
-        down.disabled = idx === selectedImages.length - 1;
-        down.onclick = () => moveImage(idx, 1);
-        controls.appendChild(up);
-        controls.appendChild(down);
+        controls.style.cssText = 'display:flex; justify-content:center; align-items:center; gap:8px; margin-top:10px;';
+        const label = document.createElement('span');
+        label.textContent = 'עמוד:';
+        label.style.cssText = 'font-size:14px; color:#374151; font-weight:bold;';
+        const select = document.createElement('select');
+        select.style.cssText = 'padding:6px 10px; border:1px solid #d1d5db; border-radius:6px; font-size:14px; cursor:pointer;';
+        for (let n = 1; n <= selectedImages.length; n++) {
+          const opt = document.createElement('option');
+          opt.value = n; opt.textContent = n;
+          if (n === idx + 1) opt.selected = true;
+          select.appendChild(opt);
+        }
+        select.onchange = () => moveImageTo(idx, parseInt(select.value) - 1);
+        controls.appendChild(label);
+        controls.appendChild(select);
 
         card.appendChild(badge);
         card.appendChild(canvas);
-        card.appendChild(num);
         card.appendChild(controls);
         list.appendChild(card);
       });
@@ -243,10 +242,11 @@
       }
     }
 
-    function moveImage(idx, dir) {
-      const target = idx + dir;
-      if (target < 0 || target >= selectedImages.length) return;
-      [selectedImages[idx], selectedImages[target]] = [selectedImages[target], selectedImages[idx]];
+    // הזז כרטיס מ-idx למיקום target, והשאר מסתדרים אוטומטית
+    function moveImageTo(idx, target) {
+      if (target < 0 || target >= selectedImages.length || target === idx) return;
+      const [item] = selectedImages.splice(idx, 1);
+      selectedImages.splice(target, 0, item);
       justMovedIdx = target; // הדגש את הכרטיס במיקומו החדש
       renderImageList();
     }
