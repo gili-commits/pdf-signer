@@ -87,7 +87,17 @@
     <div class="upload-area">
       <h2>העלאת מסמך חדש</h2>
       <p style="margin:8px 0 16px; color:#6b7280;">בחר קובץ PDF, או כמה תמונות (JPG/PNG) שיאוחדו ל-PDF אחד — עמוד לכל תמונה</p>
-      <input type="file" id="pdf-file" accept=".pdf,.jpg,.jpeg,.png" multiple />
+      <input type="file" id="pdf-file" accept=".pdf,.jpg,.jpeg,.png" multiple onchange="onFilesSelected()" />
+
+      <div id="image-options" style="display:none; margin-top:16px;">
+        <label style="display:inline-flex; align-items:center; gap:6px; font-size:14px; color:#374151; cursor:pointer;">
+          <input type="checkbox" id="enhance-toggle" checked onchange="renderImageList()" />
+          שפר לתצוגת מסמך (רקע לבן וברור)
+        </label>
+        <p style="font-size:12px; color:#9ca3af; margin:6px 0 12px;">גרור את הסדר עם החיצים — כך ייקבע מי עמוד 1, 2 וכו'</p>
+        <div id="image-list" style="display:flex; flex-wrap:wrap; gap:12px; justify-content:center;"></div>
+      </div>
+
       <br />
       <button class="btn btn-primary" onclick="uploadPdf()">העלה מסמך</button>
     </div>
@@ -144,13 +154,143 @@
       location.reload();
     }
 
+    // === בחירת קבצים: אם תמונות — הצג רשימה לסידור ושיפור ===
+    let selectedImages = []; // [{file, dataUrl}]
+
+    function onFilesSelected() {
+      const files = [...document.getElementById('pdf-file').files];
+      const optionsEl = document.getElementById('image-options');
+      const images = files.filter(f => f.type === 'image/jpeg' || f.type === 'image/png');
+
+      // אם אין תמונות (PDF או כלום) — אין מה לסדר
+      if (images.length === 0) {
+        selectedImages = [];
+        optionsEl.style.display = 'none';
+        return;
+      }
+
+      selectedImages = [];
+      let loaded = 0;
+      images.forEach((file, i) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          selectedImages[i] = { file, dataUrl: e.target.result };
+          loaded++;
+          if (loaded === images.length) {
+            optionsEl.style.display = 'block';
+            renderImageList();
+          }
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+
+    function renderImageList() {
+      const list = document.getElementById('image-list');
+      const enhance = document.getElementById('enhance-toggle').checked;
+      list.innerHTML = '';
+
+      selectedImages.forEach((item, idx) => {
+        const card = document.createElement('div');
+        card.style.cssText = 'position:relative; border:1px solid #d1d5db; border-radius:8px; padding:6px; width:120px; background:#fff;';
+
+        const canvas = document.createElement('canvas');
+        canvas.style.cssText = 'width:100%; height:150px; object-fit:contain; background:#fff;';
+        renderThumb(canvas, item.dataUrl, enhance);
+
+        const num = document.createElement('div');
+        num.textContent = `עמוד ${idx + 1}`;
+        num.style.cssText = 'font-size:12px; color:#374151; text-align:center; margin-top:4px; font-weight:bold;';
+
+        const controls = document.createElement('div');
+        controls.style.cssText = 'display:flex; justify-content:center; gap:6px; margin-top:4px;';
+        const up = document.createElement('button');
+        up.textContent = '▲'; up.className = 'btn btn-secondary'; up.style.cssText = 'padding:2px 8px; font-size:12px;';
+        up.disabled = idx === 0;
+        up.onclick = () => moveImage(idx, -1);
+        const down = document.createElement('button');
+        down.textContent = '▼'; down.className = 'btn btn-secondary'; down.style.cssText = 'padding:2px 8px; font-size:12px;';
+        down.disabled = idx === selectedImages.length - 1;
+        down.onclick = () => moveImage(idx, 1);
+        controls.appendChild(up);
+        controls.appendChild(down);
+
+        card.appendChild(canvas);
+        card.appendChild(num);
+        card.appendChild(controls);
+        list.appendChild(card);
+      });
+    }
+
+    function moveImage(idx, dir) {
+      const target = idx + dir;
+      if (target < 0 || target >= selectedImages.length) return;
+      [selectedImages[idx], selectedImages[target]] = [selectedImages[target], selectedImages[idx]];
+      renderImageList();
+    }
+
+    // ציור תמונה על canvas — עם או בלי שיפור למסמך
+    function renderThumb(canvas, dataUrl, enhance) {
+      const img = new Image();
+      img.onload = () => {
+        const ctx = canvas.getContext('2d');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        ctx.drawImage(img, 0, 0);
+        if (enhance) applyDocumentFilter(ctx, canvas.width, canvas.height);
+      };
+      img.src = dataUrl;
+    }
+
+    // סינון "מסמך": גווני אפור + מתיחת ניגודיות + הלבנת רקע
+    function applyDocumentFilter(ctx, w, h) {
+      const imgData = ctx.getImageData(0, 0, w, h);
+      const d = imgData.data;
+
+      // חשב היסטוגרמה של בהירות לקביעת סף רקע
+      let max = 0;
+      const lum = new Float32Array(d.length / 4);
+      for (let i = 0, j = 0; i < d.length; i += 4, j++) {
+        const l = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+        lum[j] = l;
+        if (l > max) max = l;
+      }
+      // נרמל כך שהרקע (הבהיר ביותר) יהפוך ללבן, והדיו יישאר כהה
+      const white = Math.max(max * 0.92, 160);
+      for (let i = 0, j = 0; i < d.length; i += 4, j++) {
+        let v = lum[j] / white * 255;
+        // עקומת ניגודיות — מבהיר רקע, מכהה טקסט
+        v = v < 128 ? Math.pow(v / 128, 1.6) * 128 : 255 - Math.pow((255 - v) / 127, 1.6) * 127;
+        v = Math.max(0, Math.min(255, v));
+        d[i] = d[i + 1] = d[i + 2] = v;
+      }
+      ctx.putImageData(imgData, 0, 0);
+    }
+
+    // המרת canvas ל-Blob לצורך שליחה
+    function canvasToBlob(canvas) {
+      return new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.9));
+    }
+
     async function uploadPdf() {
       const fileInput = document.getElementById('pdf-file');
       if (!fileInput.files.length) return alert('יש לבחור קובץ PDF או תמונות');
 
       const formData = new FormData();
-      for (const file of fileInput.files) {
-        formData.append('pdf', file);
+
+      if (selectedImages.length > 0) {
+        // תמונות — עבד ושלח לפי הסדר שנקבע
+        const enhance = document.getElementById('enhance-toggle').checked;
+        for (const item of selectedImages) {
+          const blob = await processImage(item.dataUrl, enhance);
+          const name = item.file.name.replace(/\.(jpe?g|png)$/i, '') + '.jpg';
+          formData.append('pdf', blob, name);
+        }
+      } else {
+        // PDF רגיל
+        for (const file of fileInput.files) {
+          formData.append('pdf', file);
+        }
       }
 
       const res = await fetch('/api/documents/upload', { method: 'POST', body: formData });
@@ -161,6 +301,23 @@
       } else {
         alert(data.error);
       }
+    }
+
+    // מעבד תמונה בודדת ומחזיר Blob (JPG)
+    function processImage(dataUrl, enhance) {
+      return new Promise(resolve => {
+        const img = new Image();
+        img.onload = async () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = img.width;
+          canvas.height = img.height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0);
+          if (enhance) applyDocumentFilter(ctx, canvas.width, canvas.height);
+          resolve(await canvasToBlob(canvas));
+        };
+        img.src = dataUrl;
+      });
     }
 
     async function loadDocuments() {
