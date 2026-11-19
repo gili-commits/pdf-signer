@@ -36,8 +36,13 @@ class AIError(Exception):
     pass
 
 
+def _api_key() -> str:
+    # ניקוי טעויות העתקה נפוצות: רווחים, ירידת שורה, מרכאות מסביב
+    return os.environ.get("ANTHROPIC_API_KEY", "").strip().strip("'\"").strip()
+
+
 def enabled() -> bool:
-    return bool(os.environ.get("ANTHROPIC_API_KEY"))
+    return bool(_api_key())
 
 
 _client = None
@@ -49,7 +54,7 @@ MAX_PER_HOUR = int(os.environ.get("CLAUDE_MAX_PER_HOUR", "60"))
 def _get_client():
     global _client
     if _client is None:
-        _client = anthropic.Anthropic(timeout=60, max_retries=2)
+        _client = anthropic.Anthropic(api_key=_api_key(), timeout=60, max_retries=2)
     return _client
 
 
