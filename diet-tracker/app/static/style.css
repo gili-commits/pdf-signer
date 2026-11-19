@@ -132,3 +132,19 @@ td input { min-height: 40px; min-width: 130px; padding: .3rem .5rem; font-size: 
 .login img { border-radius: 20px; }
 .login form { text-align: start; display: grid; gap: .6rem; }
 [hidden] { display: none !important; }
+
+.ai-box { display: grid; gap: .5rem; margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: 1px solid var(--line); }
+.ai-box label { font-weight: 600; }
+.ai-result:empty { display: none; }
+.ai-result { display: grid; gap: .4rem; }
+.ai-item { display: flex; align-items: center; gap: .5rem; padding: .4rem 0; border-bottom: 1px dashed var(--line); }
+.ai-item .txt { flex: 1; line-height: 1.3; }
+.ai-item small { color: var(--muted); display: block; }
+.ai-item strong { white-space: nowrap; }
+.ai-item button { min-height: 44px; min-width: 44px; padding: 0 .6rem; }
+.ai-item button.saved { color: var(--ok); border-color: var(--ok); }
+.row-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: .4rem; }
+.link-btn { min-height: 40px; border: 0; background: transparent; color: var(--accent); font-weight: 600; padding: 0 .4rem; }
+.foods.editing button { border-style: dashed; border-color: var(--danger); }
+.foods.editing button::before { content: "✕"; color: var(--danger); font-size: .8rem; }
+input.narrow { flex: 0 0 5.5rem !important; }

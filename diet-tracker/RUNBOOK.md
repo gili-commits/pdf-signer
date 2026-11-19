@@ -8,7 +8,7 @@
 | `tailscale` | `diet-tracker-tailscale` | node עצמאי `diet-tracker` ב-userspace, `tailscale serve` → HTTPS → `http://app:8080` |
 
 **בידוד:** אין `ports:` בכלל, כלומר שום פורט לא נפתח על ה-host ואין צורך לגעת ב-ufw.
-הרשת `diet-tracker-backend` היא `internal`, כך של-app אין יציאה לאינטרנט.
+הרשת `diet-tracker-backend` היא `internal`, וה-app מקבל ממנה תעבורה רק מקונטיינר ה-tailscale. יציאה לאינטרנט, לצורך Claude API בלבד, עוברת דרך `diet-tracker-egress`.
 ה-volumes `diet-tracker-data` ו-`diet-tracker-ts-state` שייכים רק לפרויקט הזה.
 ה-node של Tailscale נפרד משאר ה-nodes בשרת: יש לו state משלו, הוא לא משתמש ב-`/dev/net/tun` ולא דורש `NET_ADMIN`.
 
@@ -150,7 +150,30 @@ docker compose down            # עוצר. ה-volumes והנתונים נשמר�
 
 **לא** מפעילים `tailscale funnel`. ב-`tailscale/serve.json` מוגדר במפורש `AllowFunnel: false`.
 
-## 10. מבנה ונתונים
+## 10. חיבור ל-Claude (הערכת חלבון מטקסט חופשי)
+
+במסך "היום" מופיעה תיבה "מה אכלת?". כותבים בחופשיות, למשל "150 ג׳ חזה עוף, 2 ביצים ויוגורט פרו".
+Claude מפרק את הטקסט לפריטים ומעריך את כמות החלבון בכל אחד. אחר כך אפשר:
+- להוסיף פריט בודד (+) או את הכול,
+- לשמור פריט ככפתור מהיר (☆).
+
+את הכפתורים המהירים אפשר לערוך: "עריכה" מאפשר למחוק כפתור או להוסיף כפתור ידני.
+
+הפעלה:
+1. ליצור מפתח ב-https://platform.claude.com/settings/keys (צריך אמצעי תשלום בחשבון ה-API).
+2. ב-`.env` להוסיף:
+   ```
+   ANTHROPIC_API_KEY=sk-ant-...
+   ```
+3. `docker compose up -d --build app`
+
+הערות:
+- **מודל:** ברירת המחדל היא `claude-opus-5-5`. למשימה פשוטה כזו `CLAUDE_MODEL=claude-haiku-5-5` זול בהרבה ובדרך כלל מספיק.
+- **הגבלת שימוש:** `CLAUDE_MAX_PER_HOUR` (ברירת מחדל 60) מגביל את מספר הבקשות לשעה, כדי שלא יהיו הפתעות בחשבון.
+- **רשת:** כדי לגשת ל-API, קונטיינר ה-app מחובר גם לרשת `diet-tracker-egress`, אבל ליציאה בלבד: אין פורט פתוח פנימה, והגישה לאפליקציה עדיין רק דרך Tailscale.
+- **פרטיות:** רק הטקסט שהקלדת בתיבה נשלח ל-Claude. שום נתון אחר מה-DB לא נשלח.
+
+## 11. מבנה ונתונים
 
 ```
 diet-tracker/
@@ -161,11 +184,11 @@ diet-tracker/
     ├── Dockerfile
     ├── requirements.txt     # fastapi, uvicorn, bcrypt
     ├── make_icons.py        # יוצר את האייקונים בזמן docker build (stdlib בלבד)
-    ├── diet/                # main.py (API), db.py, auth.py, plan.py, backup.py
+    ├── diet/                # main.py (API), db.py, auth.py, plan.py, backup.py, ai.py (Claude)
     └── static/              # index.html, login.html, app.js, style.css, sw.js, manifest, icons
 ```
 
-טבלאות SQLite (`/data/diet.db`): `weights`, `days`, `weeks` (17 שורות יעד, נזרעות אוטומטית), `sessions`.
+טבלאות SQLite (`/data/diet.db`): `weights`, `days`, `weeks` (17 שורות יעד, נזרעות אוטומטית), `foods` (כפתורים מהירים), `meta`, `sessions`.
 
 API (JSON, כל הנתיבים מלבד login דורשים cookie):
 
@@ -176,5 +199,7 @@ API (JSON, כל הנתיבים מלבד login דורשים cookie):
 | PUT / DELETE | `/api/weights/{YYYY-MM-DD}` `{kg}` | |
 | GET / PATCH | `/api/days/{YYYY-MM-DD}` `{protein_g, protein_ok, strength, cardio, fish, vitamin_d, notes}` | |
 | PATCH | `/api/weeks/{n}` `{notes}` | |
+| PUT / DELETE | `/api/foods/{id}` `{name, protein_g}` | כפתורים מהירים |
+| POST | `/api/protein/estimate` `{text}` | הערכה עם Claude (לא שומר כלום) |
 
 שבוע *n* מסתיים ב-18.11.2026 + 7n ימים (שבוע 17 מסתיים ב-17.3.2027). היעד הוא ערך הקו הליניארי בתאריך הזה, והממוצע מחושב על 7 הימים שמסתיימים בו.

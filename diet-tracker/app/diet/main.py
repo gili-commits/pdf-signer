@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import auth, backup, db, plan
+from . import ai, auth, backup, db, plan
 
 STATIC = Path(__file__).resolve().parent.parent / "static"
 
@@ -156,7 +156,10 @@ def summary():
         recent = [d["date"] for d in c.execute(
             "SELECT date FROM days ORDER BY date DESC LIMIT 14")]
         days = [_day_row(c, d) for d in recent]
-    return {"auth": auth.ENABLED, "plan": plan.as_dict(), "weights": weights, "weeks": weeks, "recent_days": days}
+        foods = [dict(r) for r in c.execute(
+            "SELECT id, name, protein_g FROM foods ORDER BY sort, rowid")]
+    return {"auth": auth.ENABLED, "ai": ai.enabled(), "foods": foods,
+            "plan": plan.as_dict(), "weights": weights, "weeks": weeks, "recent_days": days}
 
 
 class WeightIn(BaseModel):
@@ -220,6 +223,42 @@ def patch_week(week: int, body: WeekPatch):
         if not cur.rowcount:
             raise HTTPException(404, "שבוע לא קיים")
     return {"week": week, "notes": body.notes}
+
+
+class FoodIn(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    protein_g: float = Field(ge=0, le=300)
+
+
+@api.put("/foods/{food_id}")
+def put_food(food_id: str, body: FoodIn):
+    if not (1 <= len(food_id) <= 64):
+        raise HTTPException(422, "מזהה לא תקין")
+    with db.tx() as c:
+        nxt = c.execute("SELECT COALESCE(MAX(sort), 0) + 1 FROM foods").fetchone()[0]
+        c.execute("INSERT INTO foods(id, name, protein_g, sort) VALUES (?,?,?,?) "
+                  "ON CONFLICT(id) DO UPDATE SET name=excluded.name, protein_g=excluded.protein_g",
+                  (food_id, body.name.strip(), round(body.protein_g, 1), nxt))
+    return {"id": food_id, "name": body.name.strip(), "protein_g": round(body.protein_g, 1)}
+
+
+@api.delete("/foods/{food_id}")
+def delete_food(food_id: str):
+    with db.tx() as c:
+        c.execute("DELETE FROM foods WHERE id=?", (food_id,))
+    return {"ok": True}
+
+
+class EstimateIn(BaseModel):
+    text: str = Field(min_length=2, max_length=500)
+
+
+@api.post("/protein/estimate")
+def protein_estimate(body: EstimateIn):
+    try:
+        return ai.estimate(body.text.strip())
+    except ai.AIError as e:
+        raise HTTPException(502, str(e))
 
 
 app.include_router(api)

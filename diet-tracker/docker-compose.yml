@@ -14,10 +14,14 @@ services:
       COOKIE_SECURE: "true"
       BACKUP_KEEP: "14"
       BACKUP_HOUR_UTC: "1"
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-opus-5-5}
+      CLAUDE_MAX_PER_HOUR: ${CLAUDE_MAX_PER_HOUR:-60}
     volumes:
       - data:/data
     networks:
-      - backend
+      - backend   # מקבל תעבורה רק מקונטיינר ה-tailscale
+      - egress    # יציאה בלבד, לקריאות ל-Claude API. אין פורט פתוח פנימה.
     read_only: true
     tmpfs:
       - /tmp
@@ -53,7 +57,7 @@ services:
 networks:
   backend:
     name: diet-tracker-backend
-    internal: true   # ל-app אין יציאה לאינטרנט ואין חיבור לשום network אחר
+    internal: true   # רשת פנימית בין tailscale ל-app בלבד
   egress:
     name: diet-tracker-egress
 

@@ -40,7 +40,22 @@
         <h2>חלבון</h2>
         <div class="protein-total"><strong id="protein">0</strong> ג׳ <span class="muted">/ יעד 130–150</span></div>
         <div class="bar"><div id="protein-bar"></div><div class="bar-mark" style="inset-inline-start:86.7%"></div></div>
+        <div id="ai-box" class="ai-box" hidden>
+          <label for="ai-text">מה אכלת?</label>
+          <textarea id="ai-text" rows="2" maxlength="500" placeholder="למשל: 150 ג׳ חזה עוף, 2 ביצים ויוגורט פרו"></textarea>
+          <button id="ai-go" type="button" class="primary big">✨ חשב חלבון עם Claude</button>
+          <div id="ai-result" class="ai-result" aria-live="polite"></div>
+        </div>
+        <div class="row-head">
+          <span class="muted">כפתורים מהירים</span>
+          <button id="foods-edit" type="button" class="link-btn">עריכה</button>
+        </div>
         <div id="foods" class="foods"></div>
+        <form id="food-add" class="inline" hidden>
+          <input id="food-name" maxlength="60" placeholder="שם הפריט" aria-label="שם הפריט" required>
+          <input id="food-g" type="number" inputmode="decimal" min="0" max="300" step="0.5" placeholder="ג׳" aria-label="גרם חלבון" required class="narrow">
+          <button type="submit">הוסף כפתור</button>
+        </form>
         <div class="inline">
           <input id="custom-g" type="number" inputmode="numeric" min="-200" max="300" placeholder="כמות ידנית (ג׳)" aria-label="כמות חלבון ידנית">
           <button id="custom-add">הוסף</button>

@@ -1,14 +1,6 @@
 'use strict';
 
 // ---------- קבועים ----------
-const FOODS = [
-  { name: 'עוף 180 ג׳', g: 55 },
-  { name: 'טונה', g: 25 },
-  { name: '2 ביצים', g: 13 },
-  { name: 'קוטג׳ 100 ג׳', g: 11 },
-  { name: 'מעדן חלבון', g: 20 },
-  { name: 'סקייר 200 ג׳', g: 20 },
-];
 const CHECKS = [
   ['protein_ok', 'עמידה ביעד החלבון'],
   ['strength', 'אימון כוח'],
@@ -22,7 +14,7 @@ const MONTHS = ['ינו׳', 'פבר׳', 'מרץ', 'אפר׳', 'מאי', 'יונ�
 const OUTBOX_KEY = 'dt_outbox';
 
 const $ = (s) => document.querySelector(s);
-const S = { summary: null, day: todayISO(), lastToday: todayISO(), dayData: null, undo: [] };
+const S = { editingFoods: false, summary: null, day: todayISO(), lastToday: todayISO(), dayData: null, undo: [] };
 
 // ---------- תאריכים ----------
 function isoLocal(d) {
@@ -154,6 +146,11 @@ function applyOutbox() {
       S.summary.weights = w;
     } else if ((m = op.path.match(/^\/api\/days\/([\d-]+)$/))) {
       if (S.dayData && S.dayData.date === m[1]) Object.assign(S.dayData, op.body);
+    } else if ((m = op.path.match(/^\/api\/foods\/(.+)$/))) {
+      const id = decodeURIComponent(m[1]);
+      const f = S.summary.foods.filter((x) => x.id !== id);
+      if (op.method === 'PUT') f.push({ id, ...op.body });
+      S.summary.foods = f;
     } else if ((m = op.path.match(/^\/api\/weeks\/(\d+)$/))) {
       const wk = S.summary.weeks.find((w) => w.week === +m[1]);
       if (wk) wk.notes = op.body.notes;
@@ -169,6 +166,8 @@ async function loadSummary() {
     if (!S.summary) { toast('אין נתונים שמורים לצפייה אופליין'); return; }
   }
   $('#logout').hidden = S.summary.auth === false;
+  $('#ai-box').hidden = !S.summary.ai;
+  S.summary.foods = S.summary.foods || [];
   applyOutbox();
   renderAll();
 }
@@ -240,15 +239,19 @@ function addProtein(amount) {
 }
 
 function buildTodayControls() {
-  const foods = $('#foods');
-  for (const f of FOODS) {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.innerHTML = `<span></span><small>+${f.g} ג׳</small>`;
-    b.firstChild.textContent = f.name;
-    b.addEventListener('click', () => { addProtein(f.g); toast(`+${f.g} ג׳ · ${f.name}`); });
-    foods.append(b);
-  }
+  $('#foods-edit').addEventListener('click', () => {
+    S.editingFoods = !S.editingFoods;
+    renderFoods();
+  });
+  $('#food-add').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const name = $('#food-name').value.trim();
+    const g = parseFloat(String($('#food-g').value).replace(',', '.'));
+    if (!name || !(g >= 0 && g <= 300)) { toast('ערכים לא תקינים'); return; }
+    saveFood(name, g);
+    $('#food-name').value = ''; $('#food-g').value = '';
+  });
+  $('#ai-go').addEventListener('click', runEstimate);
   const checks = $('#checks');
   for (const [key, label] of CHECKS) {
     const b = document.createElement('button');
@@ -302,6 +305,121 @@ function buildTodayControls() {
   $('#prev-day').addEventListener('click', () => go(-1));
   $('#next-day').addEventListener('click', () => go(1));
   $('#day').addEventListener('change', (e) => { if (e.target.value) setDay(e.target.value); });
+}
+
+// ---------- כפתורים מהירים ----------
+const fmtG = (g) => (Math.round(g * 10) / 10).toString();
+
+function renderFoods() {
+  if (!S.summary) return;
+  const box = $('#foods');
+  box.classList.toggle('editing', S.editingFoods);
+  $('#foods-edit').textContent = S.editingFoods ? 'סיום' : 'עריכה';
+  $('#food-add').hidden = !S.editingFoods;
+  box.replaceChildren(...S.summary.foods.map((f) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    const name = document.createElement('span'); name.textContent = f.name;
+    const g = document.createElement('small'); g.textContent = `+${fmtG(f.protein_g)} ג׳`;
+    b.append(name, g);
+    b.addEventListener('click', () => {
+      if (S.editingFoods) {
+        if (confirm(`למחוק את הכפתור "${f.name}"?`)) {
+          S.summary.foods = S.summary.foods.filter((x) => x.id !== f.id);
+          renderFoods();
+          write('DELETE', '/api/foods/' + encodeURIComponent(f.id));
+        }
+        return;
+      }
+      addProtein(Math.round(f.protein_g));
+      toast(`+${fmtG(f.protein_g)} ג׳ · ${f.name}`);
+    });
+    return b;
+  }));
+}
+
+function newId() {
+  return (crypto.randomUUID && crypto.randomUUID()) || `f${Date.now()}${Math.random().toString(36).slice(2)}`;
+}
+
+function saveFood(name, protein_g) {
+  const food = { id: newId(), name, protein_g: Math.round(protein_g * 10) / 10 };
+  S.summary.foods.push(food);
+  renderFoods();
+  write('PUT', '/api/foods/' + encodeURIComponent(food.id), { name: food.name, protein_g: food.protein_g });
+  toast(`נשמר כפתור: ${name}`);
+}
+
+// ---------- הערכת חלבון עם Claude ----------
+async function runEstimate() {
+  const text = $('#ai-text').value.trim();
+  if (text.length < 2) { $('#ai-text').focus(); return; }
+  if (!navigator.onLine) { toast('צריך חיבור לאינטרנט כדי לחשב'); return; }
+  const btn = $('#ai-go');
+  const out = $('#ai-result');
+  btn.disabled = true;
+  btn.textContent = 'מחשב…';
+  out.replaceChildren();
+  try {
+    const r = await api('POST', '/api/protein/estimate', { text });
+    renderEstimate(r);
+  } catch (e) {
+    const p = document.createElement('p');
+    p.className = 'error';
+    p.textContent = e instanceof TypeError ? 'אין חיבור לשרת' : e.message;
+    out.append(p);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '✨ חשב חלבון עם Claude';
+  }
+}
+
+function renderEstimate(r) {
+  const out = $('#ai-result');
+  const nodes = r.items.map((it) => {
+    const row = document.createElement('div');
+    row.className = 'ai-item';
+    const txt = document.createElement('div'); txt.className = 'txt';
+    const n = document.createElement('span'); n.textContent = it.name;
+    const a = document.createElement('small'); a.textContent = it.amount;
+    txt.append(n, a);
+    const g = document.createElement('strong'); g.textContent = `${fmtG(it.protein_g)} ג׳`;
+    const save = document.createElement('button');
+    save.type = 'button'; save.textContent = '☆';
+    save.setAttribute('aria-label', `שמור "${it.name}" ככפתור מהיר`);
+    save.title = 'שמור ככפתור מהיר';
+    save.addEventListener('click', () => {
+      if (save.classList.contains('saved')) return;
+      saveFood(`${it.name} ${it.amount}`.slice(0, 60), it.protein_g);
+      save.classList.add('saved'); save.textContent = '★';
+    });
+    const add = document.createElement('button');
+    add.type = 'button'; add.textContent = '+';
+    add.setAttribute('aria-label', `הוסף ${it.name}`);
+    add.addEventListener('click', () => {
+      addProtein(Math.round(it.protein_g));
+      toast(`+${fmtG(it.protein_g)} ג׳ · ${it.name}`);
+    });
+    row.append(txt, g, add, save);
+    return row;
+  });
+  if (r.note) {
+    const p = document.createElement('p'); p.className = 'muted'; p.textContent = r.note;
+    nodes.push(p);
+  }
+  if (r.items.length) {
+    const all = document.createElement('button');
+    all.type = 'button'; all.className = 'primary big';
+    all.textContent = `הוסף הכול · ${r.total_g} ג׳`;
+    all.addEventListener('click', () => {
+      addProtein(r.total_g);
+      toast(`+${r.total_g} ג׳`);
+      $('#ai-text').value = '';
+      out.replaceChildren();
+    });
+    nodes.push(all);
+  }
+  out.replaceChildren(...nodes);
 }
 
 function setDay(iso) {
@@ -481,6 +599,7 @@ function renderTable() {
 
 function renderAll() {
   if (!S.summary) return;
+  renderFoods();
   renderDay();
   renderChart();
   renderStats();
