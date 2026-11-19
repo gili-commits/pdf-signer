@@ -1,0 +1,68 @@
+# מבודד לחלוטין: שם פרויקט, networks, volumes וקונטיינרים — כולם עם קידומת diet-tracker-.
+# אין אף "ports:" — שום פורט לא מפורסם ל-host. הגישה היחידה היא דרך ה-node של Tailscale.
+name: diet-tracker
+
+services:
+  app:
+    build: ./app
+    image: diet-tracker-app:latest
+    container_name: diet-tracker-app
+    restart: unless-stopped
+    environment:
+      APP_PASSWORD: ${APP_PASSWORD:-}
+      APP_PASSWORD_HASH: ${APP_PASSWORD_HASH:-}
+      COOKIE_SECURE: "true"
+      BACKUP_KEEP: "14"
+      BACKUP_HOUR_UTC: "1"
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-opus-5-5}
+      CLAUDE_MAX_PER_HOUR: ${CLAUDE_MAX_PER_HOUR:-60}
+    volumes:
+      - data:/data
+    networks:
+      - backend   # מקבל תעבורה רק מקונטיינר ה-tailscale
+      - egress    # יציאה בלבד, לקריאות ל-Claude API. אין פורט פתוח פנימה.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 256m
+
+  tailscale:
+    image: tailscale/tailscale:stable
+    container_name: diet-tracker-tailscale
+    hostname: diet-tracker
+    restart: unless-stopped
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:-}
+      TS_HOSTNAME: diet-tracker
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_USERSPACE: "true"          # בלי /dev/net/tun ובלי NET_ADMIN — לא נוגע ברשת של ה-host
+      TS_AUTH_ONCE: "true"          # המפתח נדרש רק בהרשמה הראשונה; אחר כך ה-state מה-volume
+      TS_SERVE_CONFIG: /config/serve.json
+      TS_ACCEPT_DNS: "false"
+      TS_EXTRA_ARGS: ${TS_EXTRA_ARGS:-}
+    volumes:
+      - ts-state:/var/lib/tailscale
+      - ./tailscale/serve.json:/config/serve.json:ro
+    networks:
+      - backend   # כדי להגיע ל-app:8080
+      - egress    # כדי להגיע לשרתי Tailscale / DERP
+    depends_on:
+      app:
+        condition: service_healthy
+    mem_limit: 256m
+
+networks:
+  backend:
+    name: diet-tracker-backend
+    internal: true   # רשת פנימית בין tailscale ל-app בלבד
+  egress:
+    name: diet-tracker-egress
+
+volumes:
+  data:
+    name: diet-tracker-data       # SQLite + גיבויים
+  ts-state:
+    name: diet-tracker-ts-state   # זהות ה-node של Tailscale
