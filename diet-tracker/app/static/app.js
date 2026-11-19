@@ -1,22 +1,23 @@
 'use strict';
 
-// ---------- קבועים ----------
-const CHECKS = [
-  ['protein_ok', 'עמידה ביעד החלבון'],
-  ['strength', 'אימון כוח'],
-  ['cardio', 'אירובי'],
-  ['fish', 'דגים'],
-  ['vitamin_d', 'ויטמין D'],
-];
-const PROTEIN_MIN = 130;
-const PROTEIN_MAX = 150;
+// ============================================================
+//  מצב: כל הנתונים מגיעים מ-/api/summary ונשמרים בזיכרון (S.data).
+//  כל כתיבה מעדכנת קודם את S.data (applyOp) ואז נשלחת לשרת,
+//  ובאופליין נכנסת לתור ב-localStorage ונשלחת כשהחיבור חוזר.
+// ============================================================
 const MONTHS = ['ינו׳', 'פבר׳', 'מרץ', 'אפר׳', 'מאי', 'יוני', 'יולי', 'אוג׳', 'ספט׳', 'אוק׳', 'נוב׳', 'דצמ׳'];
 const OUTBOX_KEY = 'dt_outbox';
+const MORNING_KEY = 'dt_morning_asked';
+const OTHER_SIZES = [
+  { key: 'small', label: 'קטן', kcal: 150 },
+  { key: 'medium', label: 'בינוני', kcal: 400 },
+  { key: 'large', label: 'גדול', kcal: 800 },
+];
 
 const $ = (s) => document.querySelector(s);
-const S = { editingFoods: false, summary: null, day: todayISO(), lastToday: todayISO(), dayData: null, undo: [] };
+const S = { data: null, day: todayISO(), lastToday: todayISO() };
 
-// ---------- תאריכים ----------
+// ---------- עזרי תאריך ומספרים ----------
 function isoLocal(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
@@ -29,32 +30,98 @@ function addDays(iso, n) {
 function daysBetween(a, b) {
   return Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 864e5);
 }
+function weekStart(iso) { // יום ראשון
+  const d = new Date(iso + 'T12:00:00');
+  return addDays(iso, -d.getDay());
+}
 function fmtDate(iso, withYear = false) {
   const [y, m, d] = iso.split('-');
   return withYear ? `${+d}.${+m}.${y.slice(2)}` : `${+d}.${+m}`;
 }
+function fmtTime(ts) {
+  const d = new Date(ts);
+  return isNaN(d) ? '' : d.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
+}
+const r1 = (x) => Math.round(x * 10) / 10;
+const fmtInt = (x) => Math.round(x).toLocaleString('he-IL');
+const fmtG = (g) => String(r1(g));
+const signed = (x) => '‎' + (x > 0 ? '+' : '') + x.toFixed(1); // LRM: שהמינוס יופיע במקום הנכון ב-RTL
+const parseNum = (v) => parseFloat(String(v).replace(',', '.').trim());
+function newId() {
+  return (crypto.randomUUID && crypto.randomUUID()) || `i${Date.now()}${Math.random().toString(36).slice(2)}`;
+}
+function el(tag, props = {}, ...kids) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === 'class') n.className = v;
+    else if (k === 'on') for (const [ev, fn] of Object.entries(v)) n.addEventListener(ev, fn);
+    else if (k in n && typeof v !== 'string') n[k] = v;
+    else n.setAttribute(k, v);
+  }
+  for (const c of kids) if (c != null) n.append(c);
+  return n;
+}
+
+// ---------- נתונים נגזרים ----------
+const settings = () => S.data.settings;
+const entriesOn = (date) => S.data.entries.filter((e) => e.date === date)
+  .sort((a, b) => (Date.parse(a.created_at) || 0) - (Date.parse(b.created_at) || 0));
+const sumOn = (date, kind) => S.data.entries.reduce((s, e) => (e.date === date && e.kind === kind ? s + e.amount : s), 0);
+const proteinOn = (date) => sumOn(date, 'protein');
+const sinsOn = (date) => sumOn(date, 'sin');
+function sumRange(kind, from, to) {
+  return S.data.entries.reduce((s, e) => (e.kind === kind && e.date >= from && e.date <= to ? s + e.amount : s), 0);
+}
+const isChecked = (date, id) => S.data.checks.some((c) => c.date === date && c.item_id === id);
+const weightOn = (date) => S.data.weights.find((w) => w.date === date);
+const waistOn = (date) => S.data.waist.find((w) => w.date === date);
+const notesOn = (date) => (S.data.notes.find((n) => n.date === date) || {}).notes || '';
+function avg(list) { return list.length ? list.reduce((s, x) => s + x, 0) / list.length : null; }
 function targetFor(iso) {
-  const p = S.summary.plan;
+  const p = S.data.plan;
   const total = daysBetween(p.start, p.end);
   const t = Math.min(Math.max(daysBetween(p.start, iso), 0), total);
   return p.start_kg + (p.end_kg - p.start_kg) * t / total;
 }
-const r1 = (x) => Math.round(x * 10) / 10;
 
-// ---------- הודעות ----------
-let toastTimer;
-function toast(msg) {
-  let el = $('.toast');
-  if (!el) { el = document.createElement('div'); el.className = 'toast'; el.setAttribute('role', 'status'); document.body.append(el); }
-  el.textContent = msg;
-  el.hidden = false;
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { el.hidden = true; }, 2200);
+// ---------- applyOp: עדכון מקומי לכל סוג כתיבה (משמש גם לתור האופליין) ----------
+function upsert(list, key, val, item) {
+  const i = list.findIndex((x) => x[key] === val);
+  if (item == null) { if (i >= 0) list.splice(i, 1); }
+  else if (i >= 0) list[i] = { ...list[i], ...item };
+  else list.push(item);
+}
+const byDate = (a, b) => a.date.localeCompare(b.date);
+const OPS = [
+  [/^\/api\/weights\/([\d-]+)$/, (m, op) => {
+    upsert(S.data.weights, 'date', m[1], op.method === 'PUT' ? { date: m[1], kg: r1(op.body.kg) } : null);
+    S.data.weights.sort(byDate);
+  }],
+  [/^\/api\/waist\/([\d-]+)$/, (m, op) => {
+    upsert(S.data.waist, 'date', m[1], op.method === 'PUT' ? { date: m[1], cm: r1(op.body.cm) } : null);
+    S.data.waist.sort(byDate);
+  }],
+  [/^\/api\/entries\/(.+)$/, (m, op) => upsert(S.data.entries, 'id', m[1], op.method === 'PUT' ? { id: m[1], ...op.body } : null)],
+  [/^\/api\/checks\/([\d-]+)\/(.+)$/, (m, op) => {
+    S.data.checks = S.data.checks.filter((c) => !(c.date === m[1] && c.item_id === m[2]));
+    if (op.body.done) S.data.checks.push({ date: m[1], item_id: m[2] });
+  }],
+  [/^\/api\/days\/([\d-]+)$/, (m, op) => upsert(S.data.notes, 'date', m[1], { date: m[1], notes: op.body.notes })],
+  [/^\/api\/weeks\/(\d+)$/, (m, op) => { const w = S.data.weeks.find((x) => x.week === +m[1]); if (w) w.notes = op.body.notes; }],
+  [/^\/api\/foods\/(.+)$/, (m, op) => upsert(S.data.foods, 'id', m[1], op.method === 'PUT' ? { id: m[1], ...op.body } : null)],
+  [/^\/api\/sin-items\/(.+)$/, (m, op) => upsert(S.data.sin_items, 'id', m[1], op.method === 'PUT' ? { id: m[1], ...op.body } : null)],
+  [/^\/api\/checklist-items\/(.+)$/, (m, op) => upsert(S.data.checklist_items, 'id', m[1], op.method === 'PUT' ? { id: m[1], ...op.body } : null)],
+  [/^\/api\/settings$/, (m, op) => Object.assign(S.data.settings, op.body)],
+];
+function applyOp(op) {
+  for (const [re, fn] of OPS) {
+    const m = op.path.match(re);
+    if (m) { fn(m.map(decodeURIComponent), op); return; }
+  }
 }
 
-// ---------- רשת + תור כתיבות אופליין ----------
+// ---------- רשת ----------
 class ApiError extends Error {}
-
 async function api(method, path, body) {
   const r = await fetch(path, {
     method,
@@ -70,7 +137,6 @@ async function api(method, path, body) {
   }
   return r.json();
 }
-
 function loadOutbox() {
   try { return JSON.parse(localStorage.getItem(OUTBOX_KEY)) || []; } catch { return []; }
 }
@@ -78,28 +144,26 @@ function saveOutbox(q) {
   try { localStorage.setItem(OUTBOX_KEY, JSON.stringify(q)); } catch { /* אחסון חסום */ }
 }
 
-// כל הכתיבות עוברות בשרשרת אחת, כדי שיגיעו לשרת בסדר שבו נעשו
+// כתיבה: עדכון מקומי מיד, ושליחה לשרת בשרשרת אחת לפי הסדר
 let chain = Promise.resolve();
 function write(method, path, body) {
-  chain = chain.then(() => doWrite(method, path, body)).catch(() => {});
+  if (S.data) { applyOp({ method, path, body }); renderAll(); }
+  chain = chain.then(() => send(method, path, body)).catch(() => {});
   return chain;
 }
-async function doWrite(method, path, body) {
-  if (loadOutbox().length) {
-    enqueue(method, path, body);
-    return flush();
-  }
+async function send(method, path, body) {
+  if (loadOutbox().length) { enqueue(method, path, body); return flush(); }
   try {
     await api(method, path, body);
   } catch (e) {
-    if (e instanceof TypeError) { enqueue(method, path, body); }
+    if (e instanceof TypeError) enqueue(method, path, body);
     else toast(e.message);
   }
   updateNet();
 }
 function enqueue(method, path, body) {
   const q = loadOutbox();
-  q.push({ id: Date.now() + Math.random(), method, path, body });
+  q.push({ id: newId(), method, path, body });
   saveOutbox(q);
   updateNet();
 }
@@ -115,8 +179,8 @@ async function flush() {
       try {
         await api(op.method, op.path, op.body);
       } catch (e) {
-        if (e instanceof TypeError) break; // עדיין אופליין — ננסה אחר כך
-        toast(e.message); // שגיאת ולידציה: אין טעם לנסות שוב
+        if (e instanceof TypeError) break;
+        toast(e.message);
       }
       saveOutbox(loadOutbox().filter((o) => o.id !== op.id));
       sent++;
@@ -128,229 +192,453 @@ async function flush() {
   if (sent && !loadOutbox().length) toast('הנתונים סונכרנו');
 }
 function updateNet() {
-  const el = $('#net');
   const n = loadOutbox().length;
-  if (!navigator.onLine) { el.textContent = 'אופליין'; el.hidden = false; }
-  else if (n) { el.textContent = `ממתין לסנכרון (${n})`; el.hidden = false; }
-  else el.hidden = true;
+  const elNet = $('#net');
+  if (!navigator.onLine) { elNet.textContent = 'אופליין'; elNet.hidden = false; }
+  else if (n) { elNet.textContent = `ממתין לסנכרון (${n})`; elNet.hidden = false; }
+  else elNet.hidden = true;
 }
 
-// שכבת כתיבות שעדיין לא הגיעו לשרת מעל הנתונים שנטענו
-function applyOutbox() {
-  for (const op of loadOutbox()) {
-    let m;
-    if ((m = op.path.match(/^\/api\/weights\/([\d-]+)$/))) {
-      const w = S.summary.weights.filter((x) => x.date !== m[1]);
-      if (op.method === 'PUT') w.push({ date: m[1], kg: r1(op.body.kg) });
-      w.sort((a, b) => a.date.localeCompare(b.date));
-      S.summary.weights = w;
-    } else if ((m = op.path.match(/^\/api\/days\/([\d-]+)$/))) {
-      if (S.dayData && S.dayData.date === m[1]) Object.assign(S.dayData, op.body);
-    } else if ((m = op.path.match(/^\/api\/foods\/(.+)$/))) {
-      const id = decodeURIComponent(m[1]);
-      const f = S.summary.foods.filter((x) => x.id !== id);
-      if (op.method === 'PUT') f.push({ id, ...op.body });
-      S.summary.foods = f;
-    } else if ((m = op.path.match(/^\/api\/weeks\/(\d+)$/))) {
-      const wk = S.summary.weeks.find((w) => w.week === +m[1]);
-      if (wk) wk.notes = op.body.notes;
-    }
-  }
-}
-
-// ---------- טעינה ----------
-async function loadSummary() {
+async function loadData() {
   try {
-    S.summary = await api('GET', '/api/summary');
-  } catch (e) {
-    if (!S.summary) { toast('אין נתונים שמורים לצפייה אופליין'); return; }
-  }
-  $('#logout').hidden = S.summary.auth === false;
-  $('#ai-box').hidden = !S.summary.ai;
-  S.summary.foods = S.summary.foods || [];
-  applyOutbox();
-  renderAll();
-}
-
-function blankDay(date) {
-  return { date, protein_g: 0, protein_ok: false, strength: false, cardio: false, fish: false, vitamin_d: false, notes: '' };
-}
-
-async function loadDay() {
-  const d = S.day;
-  let data;
-  try {
-    data = await api('GET', '/api/days/' + d);
+    S.data = await api('GET', '/api/summary');
   } catch {
-    data = (S.summary?.recent_days || []).find((x) => x.date === d) || blankDay(d);
+    if (!S.data) { toast('אין נתונים שמורים לצפייה אופליין'); return; }
   }
-  if (d !== S.day) return; // המשתמש כבר עבר ליום אחר
-  S.dayData = data;
-  applyOutbox();
-  renderDay();
+  for (const op of loadOutbox()) applyOp(op); // כתיבות שעוד לא הגיעו לשרת
+  $('#ai-box').hidden = !S.data.ai;
+  $('#logout-card').hidden = S.data.auth === false;
+  renderAll();
+  renderSettings();
+}
+
+// ---------- הודעות וחלון אישור ----------
+let toastTimer;
+function toast(msg) {
+  let t = $('.toast');
+  if (!t) { t = el('div', { class: 'toast', role: 'status' }); document.body.append(t); }
+  t.textContent = msg;
+  t.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.hidden = true; }, 2200);
+}
+
+/** חלון בתוך האפליקציה. מחזיר את value של הכפתור שנלחץ, או null. */
+function modal({ title, body = [], actions }) {
+  const dlg = $('#modal');
+  $('#modal-title').textContent = title;
+  $('#modal-body').replaceChildren(...body);
+  $('#modal-actions').replaceChildren(...actions.map((a) =>
+    el('button', { value: a.value, class: a.class || '', type: 'submit' }, a.label)));
+  return new Promise((resolve) => {
+    dlg.addEventListener('close', () => resolve(dlg.returnValue && dlg.returnValue !== 'cancel' ? dlg.returnValue : null), { once: true });
+    dlg.returnValue = '';
+    dlg.showModal();
+  });
+}
+const confirmModal = (title, text, okLabel = 'אישור') => modal({
+  title,
+  body: text ? [el('p', {}, text)] : [],
+  actions: [{ label: okLabel, value: 'ok', class: 'primary' }, { label: 'ביטול', value: 'cancel', class: 'subtle' }],
+}).then((v) => v === 'ok');
+
+// ---------- הזנות ----------
+function addEntry(date, kind, name, amount, emoji = '') {
+  const id = newId();
+  write('PUT', '/api/entries/' + id, {
+    date, kind, name, emoji, amount: r1(amount), created_at: new Date().toISOString(),
+  });
+  return id;
+}
+const delEntry = (id) => write('DELETE', '/api/entries/' + encodeURIComponent(id));
+
+function addProtein(name, g) {
+  if (!(g > 0)) return;
+  addEntry(S.day, 'protein', name, g);
+  toast(`+${fmtG(g)} ג׳ · ${name}`);
+}
+function addSin(date, item) {
+  addEntry(date, 'sin', item.name, item.kcal, item.emoji);
+  toast(`${item.emoji || '😈'} ${item.name} · ${fmtInt(item.kcal)} קל׳`);
+}
+
+async function otherSin(date) {
+  let size = 'medium';
+  const sizeBtns = OTHER_SIZES.map((s) => el('button', {
+    type: 'button', class: 'chip', 'aria-pressed': String(s.key === size),
+    on: { click: () => { size = s.key; sizeBtns.forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.k === size))); } },
+  }, `${s.label} · ${s.kcal}`));
+  sizeBtns.forEach((b, i) => { b.dataset.k = OTHER_SIZES[i].key; });
+  const name = el('input', { type: 'text', maxlength: '60', placeholder: 'מה זה היה? (לא חובה)', autocomplete: 'off' });
+  const v = await modal({
+    title: 'חטא אחר',
+    body: [el('div', { class: 'chips' }, ...sizeBtns), name],
+    actions: [{ label: 'הוסף', value: 'ok', class: 'primary' }, { label: 'ביטול', value: 'cancel', class: 'subtle' }],
+  });
+  if (v !== 'ok') return;
+  const s = OTHER_SIZES.find((x) => x.key === size);
+  addSin(date, { emoji: '🍽️', name: name.value.trim() || `אחר (${s.label})`, kcal: s.kcal });
+}
+
+function sinButtons(date) {
+  return [
+    ...S.data.sin_items.map((it) => el('button', { type: 'button', on: { click: () => addSin(date, it) } },
+      el('span', { class: 'emoji' }, it.emoji || '😈'), el('span', {}, it.name), el('small', {}, `${fmtInt(it.kcal)} קל׳`))),
+    el('button', { type: 'button', class: 'other', on: { click: () => otherSin(date) } },
+      el('span', { class: 'emoji' }, '➕'), el('span', {}, 'אחר'), el('small', {}, 'בוחרים גודל')),
+  ];
+}
+
+function logItems(date, kinds) {
+  const list = entriesOn(date).filter((e) => kinds.includes(e.kind));
+  if (!list.length) return [el('li', { class: 'muted empty' }, 'עוד לא נרשם כלום')];
+  return list.map((e) => el('li', {},
+    el('span', { class: 'what' }, `${e.emoji ? e.emoji + ' ' : ''}${e.name}`),
+    el('span', { class: 'amt' }, e.kind === 'protein' ? `${fmtG(e.amount)} ג׳` : `${fmtInt(e.amount)} קל׳`),
+    el('span', { class: 'time muted' }, fmtTime(e.created_at)),
+    el('button', { type: 'button', class: 'x', 'aria-label': `מחק ${e.name}`, on: { click: () => { delEntry(e.id); toast('נמחק'); } } }, '✕'),
+  ));
 }
 
 // ---------- מסך "היום" ----------
-function renderDay() {
-  const d = S.dayData;
-  if (!d) return;
-  $('#day').value = S.day;
+function renderToday() {
+  const d = S.day;
+  $('#day').value = d;
+  const st = settings();
 
-  if (S.summary) {
-    const w = S.summary.weights.find((x) => x.date === S.day);
-    if (document.activeElement !== $('#kg')) $('#kg').value = w ? w.kg.toFixed(1) : '';
-    const t = targetFor(S.day);
-    let info = `יעד ליום זה: ${t.toFixed(1)} ק״ג`;
-    if (w) {
-      const diff = r1(w.kg - t);
-      info += diff > 0 ? ` · ${diff.toFixed(1)} מעל היעד` : diff < 0 ? ` · ${(-diff).toFixed(1)} מתחת ליעד 👏` : ' · בדיוק ביעד';
-    }
-    $('#weight-info').textContent = info;
+  // שקילה
+  const w = weightOn(d);
+  if (document.activeElement !== $('#kg')) $('#kg').value = w ? w.kg.toFixed(1) : '';
+  const t = targetFor(d);
+  let info;
+  if (w) {
+    const diff = r1(w.kg - t);
+    const parts = [w.kg.toFixed(1),
+      diff > 0 ? `${diff.toFixed(1)} מעל היעד` : diff < 0 ? `${(-diff).toFixed(1)} מתחת ליעד 👏` : 'בדיוק ביעד'];
+    const y = weightOn(addDays(d, -1));
+    const prev = y || [...S.data.weights].reverse().find((x) => x.date < d);
+    if (prev) parts.push(`${signed(r1(w.kg - prev.kg))} ${y ? 'מאתמול' : `מ-${fmtDate(prev.date)}`}`);
+    info = parts.join(' · ');
+  } else {
+    info = `יעד ליום זה: ${t.toFixed(1)} ק״ג`;
   }
+  $('#weight-info').textContent = info;
 
-  const g = d.protein_g || 0;
-  $('#protein').textContent = g;
-  const bar = $('#protein-bar');
-  bar.style.width = Math.min(100, (g / PROTEIN_MAX) * 100) + '%';
-  bar.classList.toggle('done', g >= PROTEIN_MIN);
-  $('#undo').disabled = !S.undo.some((u) => u.day === S.day);
+  const wa = waistOn(d);
+  if (document.activeElement !== $('#waist')) $('#waist').value = wa ? wa.cm.toFixed(1) : '';
+  const lastWaist = [...S.data.waist].reverse().find((x) => x.date < d);
+  $('#waist-info').textContent = wa && lastWaist
+    ? `${signed(r1(wa.cm - lastWaist.cm))} ס״מ מ-${fmtDate(lastWaist.date)}`
+    : !wa && lastWaist ? `מדידה אחרונה: ${lastWaist.cm.toFixed(1)} ס״מ (${fmtDate(lastWaist.date)})` : '';
 
-  for (const [key] of CHECKS) {
-    const btn = document.querySelector(`.check[data-key="${key}"]`);
-    btn.setAttribute('aria-pressed', String(!!d[key]));
-  }
-  if (document.activeElement !== $('#day-notes')) $('#day-notes').value = d.notes || '';
+  // חלבון
+  const target = st.protein_target;
+  const g = proteinOn(d);
+  const max = target * 1.15;
+  $('#protein').textContent = fmtInt(g);
+  $('#protein-status').textContent = g >= target ? '✓ ביעד' : `עוד ${fmtInt(target - g)} ג׳ ליעד`;
+  $('#protein-status').classList.toggle('done', g >= target);
+  $('#protein-bar').style.width = Math.min(100, (g / max) * 100) + '%';
+  $('#protein-bar').classList.toggle('done', g >= target);
+  $('#protein-mark').style.insetInlineStart = (target / max * 100) + '%';
+  $('#foods').replaceChildren(...S.data.foods.map((f) => el('button', { type: 'button', on: { click: () => addProtein(f.name, f.protein_g) } },
+    el('span', {}, f.name), el('small', {}, `+${fmtG(f.protein_g)} ג׳`))));
+
+  // חטאים
+  $('#sins').replaceChildren(...sinButtons(d));
+  const ws = weekStart(d);
+  const weekKcal = sumRange('sin', ws, addDays(ws, 6));
+  const budget = st.sin_budget;
+  $('#sin-week').textContent = `חטאים השבוע: ${fmtInt(weekKcal)} / ${fmtInt(budget)} קל׳`;
+  const days = Math.round((weekKcal / st.deficit_daily) * 2) / 2;
+  $('#sin-days').textContent = weekKcal ? `≈ ${days} ימי גירעון` : 'נקי השבוע 😇';
+  $('#sin-bar').style.width = Math.min(100, budget ? (weekKcal / budget) * 100 : 100) + '%';
+  $('#sin-bar').classList.toggle('over', weekKcal > budget);
+
+  // רשימת ההזנות
+  $('#log').replaceChildren(...logItems(d, ['protein', 'sin']));
+  $('#undo').disabled = !entriesOn(d).length;
+
+  // צ'ק-ליסט: החלבון אוטומטי
+  const auto = el('div', { class: 'check auto', role: 'img', 'aria-label': `עמידה ביעד החלבון: ${g >= target ? 'כן' : 'לא'}`, 'data-done': String(g >= target) },
+    el('span', {}, 'עמידה ביעד החלבון', el('small', { class: 'muted' }, ' · אוטומטי')));
+  $('#checks').replaceChildren(auto, ...S.data.checklist_items.map((it) => el('button', {
+    type: 'button', class: 'check', 'aria-pressed': String(isChecked(d, it.id)),
+    on: { click: () => write('PUT', `/api/checks/${d}/${encodeURIComponent(it.id)}`, { done: !isChecked(d, it.id) }) },
+  }, it.label)));
+  if (document.activeElement !== $('#day-notes')) $('#day-notes').value = notesOn(d);
+
+  renderMorning();
 }
 
-function saveDay(patch) {
-  Object.assign(S.dayData, patch);
-  renderDay();
-  write('PATCH', '/api/days/' + S.dayData.date, patch);
+// ---------- תזכורת בוקר ----------
+function morningAsked() { try { return localStorage.getItem(MORNING_KEY); } catch { return null; } }
+function setMorningAsked(v) { try { localStorage.setItem(MORNING_KEY, v); } catch { /* */ } }
+let morningOpenFor = null;
+function maybeAskMorning() {
+  const today = todayISO();
+  if (S.day !== today || morningAsked() === today) return;
+  setMorningAsked(today); // פעם אחת ביום
+  morningOpenFor = today;
+  renderMorning();
+}
+function renderMorning() {
+  const box = $('#morning');
+  const open = morningOpenFor && morningOpenFor === S.day;
+  box.hidden = !open;
+  if (!open) return;
+  const y = addDays(S.day, -1);
+  $('#morning-sins').replaceChildren(...sinButtons(y));
+  const had = entriesOn(y).some((e) => e.kind === 'sin');
+  $('#morning-log').replaceChildren(...(had ? logItems(y, ['sin']) : []));
+  $('#morning-done').textContent = had ? 'סיום ✓' : 'לא, היה נקי ✨';
 }
 
-function addProtein(amount) {
-  if (!S.dayData || !amount) return;
-  const cur = S.dayData.protein_g || 0;
-  const next = Math.max(0, Math.min(1000, cur + amount));
-  S.undo.push({ day: S.day, prev: cur });
-  const patch = { protein_g: next };
-  if (cur < PROTEIN_MIN && next >= PROTEIN_MIN && !S.dayData.protein_ok) patch.protein_ok = true;
-  saveDay(patch);
+// ---------- גרף משקל ----------
+function svgEl(tag, attrs, text) {
+  const n = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (const k in attrs) n.setAttribute(k, attrs[k]);
+  if (text != null) n.textContent = text;
+  return n;
 }
-
-function buildTodayControls() {
-  $('#foods-edit').addEventListener('click', () => {
-    S.editingFoods = !S.editingFoods;
-    renderFoods();
-  });
-  $('#food-add').addEventListener('submit', (e) => {
-    e.preventDefault();
-    const name = $('#food-name').value.trim();
-    const g = parseFloat(String($('#food-g').value).replace(',', '.'));
-    if (!name || !(g >= 0 && g <= 300)) { toast('ערכים לא תקינים'); return; }
-    saveFood(name, g);
-    $('#food-name').value = ''; $('#food-g').value = '';
-  });
-  $('#ai-go').addEventListener('click', runEstimate);
-  const checks = $('#checks');
-  for (const [key, label] of CHECKS) {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'check';
-    b.dataset.key = key;
-    b.textContent = label;
-    b.setAttribute('aria-pressed', 'false');
-    b.addEventListener('click', () => { if (S.dayData) saveDay({ [key]: !S.dayData[key] }); });
-    checks.append(b);
+function axes(svg, { W, H, m, x0, x1, y0, y1, X, Y, step }) {
+  for (let v = y0; v <= y1 + 1e-9; v += step) {
+    svg.append(svgEl('line', { x1: m.l, x2: W - m.r, y1: Y(v), y2: Y(v), stroke: 'var(--line)' }));
+    svg.append(svgEl('text', { x: m.l - 4, y: Y(v) + 3, 'text-anchor': 'end' }, r1(v)));
   }
+  const d = new Date(x0 + 'T12:00:00');
+  d.setDate(1);
+  for (;;) {
+    d.setMonth(d.getMonth() + 1);
+    const iso = isoLocal(d);
+    if (iso > x1) break;
+    svg.append(svgEl('line', { x1: X(iso), x2: X(iso), y1: m.t, y2: H - m.b, stroke: 'var(--line)', 'stroke-dasharray': '2 3' }));
+    svg.append(svgEl('text', { x: X(iso), y: H - m.b + 14, 'text-anchor': 'middle' }, MONTHS[d.getMonth()]));
+  }
+  const today = todayISO();
+  if (today >= x0 && today <= x1) {
+    svg.append(svgEl('line', { x1: X(today), x2: X(today), y1: m.t, y2: H - m.b, stroke: 'var(--muted)', opacity: 0.5 }));
+  }
+}
+function movingAvg(list, key) { // ממוצע של המדידות ב-7 הימים שמסתיימים בכל מדידה
+  return list.map((p) => {
+    const from = addDays(p.date, -6);
+    return { date: p.date, v: avg(list.filter((q) => q.date >= from && q.date <= p.date).map((q) => q[key])) };
+  });
+}
+function renderChart() {
+  const box = $('#chart');
+  if (!S.data || !box.offsetParent) return;
+  const p = S.data.plan;
+  const ws = S.data.weights;
+  const W = 360, H = 250, m = { l: 30, r: 10, t: 10, b: 26 };
+  let x0 = p.start, x1 = p.end;
+  if (ws.length) { if (ws[0].date < x0) x0 = ws[0].date; if (ws.at(-1).date > x1) x1 = ws.at(-1).date; }
+  const span = Math.max(1, daysBetween(x0, x1));
+  const kgs = ws.map((w) => w.kg).concat([p.start_kg, p.end_kg]);
+  const y0 = Math.floor(Math.min(...kgs) - 0.5), y1 = Math.ceil(Math.max(...kgs) + 0.5);
+  const X = (iso) => m.l + (W - m.l - m.r) * daysBetween(x0, iso) / span;
+  const plotBottom = H - m.b - 10; // פס תחתון לסימוני חטאים
+  const Y = (kg) => m.t + (plotBottom - m.t) * (y1 - kg) / (y1 - y0);
+  const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, direction: 'ltr', role: 'img', 'aria-label': 'גרף משקל מול התוכנית' });
+  axes(svg, { W, H, m, x0, x1, y0, y1, X, Y, step: y1 - y0 > 12 ? 2 : 1 });
 
-  $('#custom-add').addEventListener('click', () => {
-    const v = parseInt($('#custom-g').value, 10);
-    if (Number.isFinite(v) && v !== 0) { addProtein(v); $('#custom-g').value = ''; }
-  });
-  $('#undo').addEventListener('click', () => {
-    for (let i = S.undo.length - 1; i >= 0; i--) {
-      if (S.undo[i].day === S.day) {
-        const [u] = S.undo.splice(i, 1);
-        saveDay({ protein_g: u.prev });
-        return;
-      }
-    }
-  });
-  $('#reset').addEventListener('click', () => {
-    if (S.dayData && confirm('לאפס את מונה החלבון של היום?')) {
-      S.undo.push({ day: S.day, prev: S.dayData.protein_g });
-      saveDay({ protein_g: 0 });
-    }
-  });
+  svg.append(svgEl('line', { x1: X(p.start), y1: Y(p.start_kg), x2: X(p.end), y2: Y(p.end_kg),
+    stroke: 'var(--target)', 'stroke-width': 2, 'stroke-dasharray': '6 4' }));
+  for (const w of ws) svg.append(svgEl('circle', { cx: X(w.date), cy: Y(w.kg), r: 2.6, fill: 'var(--actual)', opacity: 0.55 }));
+  const ma = movingAvg(ws, 'kg');
+  if (ma.length > 1) {
+    svg.append(svgEl('polyline', { points: ma.map((q) => `${X(q.date)},${Y(q.v)}`).join(' '),
+      fill: 'none', stroke: 'var(--avg)', 'stroke-width': 3, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }));
+  }
+  // ימים עם חטאים: נקודה בפס התחתון, גודל לפי כמות
+  const sinDays = new Map();
+  for (const e of S.data.entries) if (e.kind === 'sin') sinDays.set(e.date, (sinDays.get(e.date) || 0) + e.amount);
+  for (const [date, kcal] of sinDays) {
+    if (date < x0 || date > x1) continue;
+    const c = svgEl('circle', { cx: X(date), cy: H - m.b - 4, r: 2 + Math.min(3, kcal / 400), fill: 'var(--sin)' });
+    c.append(svgEl('title', {}, `${fmtDate(date)} · ${fmtInt(kcal)} קל׳`));
+    svg.append(c);
+  }
+  box.replaceChildren(svg);
+}
 
-  let notesTimer;
-  const saveNotes = () => {
-    clearTimeout(notesTimer);
-    if (S.dayData && $('#day-notes').value !== S.dayData.notes) saveDay({ notes: $('#day-notes').value });
+function renderWaistChart() {
+  const box = $('#waist-chart');
+  if (!S.data || !box.offsetParent) return;
+  const list = S.data.waist;
+  if (!list.length) { box.replaceChildren(el('p', { class: 'muted' }, 'עוד אין מדידות. מודדים פעם בשבוע במסך "היום".')); return; }
+  const p = S.data.plan;
+  const W = 360, H = 200, m = { l: 30, r: 10, t: 10, b: 26 };
+  let x0 = p.start < list[0].date ? p.start : list[0].date;
+  let x1 = p.end > list.at(-1).date ? p.end : list.at(-1).date;
+  const span = Math.max(1, daysBetween(x0, x1));
+  const cms = list.map((w) => w.cm);
+  const y0 = Math.floor(Math.min(...cms) - 1), y1 = Math.ceil(Math.max(...cms) + 1);
+  const X = (iso) => m.l + (W - m.l - m.r) * daysBetween(x0, iso) / span;
+  const Y = (v) => m.t + (H - m.b - m.t) * (y1 - v) / (y1 - y0);
+  const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, direction: 'ltr', role: 'img', 'aria-label': 'גרף היקף מותניים' });
+  axes(svg, { W, H, m, x0, x1, y0, y1, X, Y, step: y1 - y0 > 10 ? 2 : 1 });
+  if (list.length > 1) {
+    svg.append(svgEl('polyline', { points: list.map((w) => `${X(w.date)},${Y(w.cm)}`).join(' '),
+      fill: 'none', stroke: 'var(--actual)', 'stroke-width': 2.5, 'stroke-linejoin': 'round' }));
+  }
+  for (const w of list) svg.append(svgEl('circle', { cx: X(w.date), cy: Y(w.cm), r: 4, fill: 'var(--actual)' }));
+  box.replaceChildren(svg);
+}
+
+// ---------- סיכום שבועי ----------
+function weekStats(from) {
+  const to = addDays(from, 6);
+  const limit = todayISO() < to ? todayISO() : to;
+  const days = [];
+  for (let d = from; d <= limit; d = addDays(d, 1)) days.push(d);
+  const target = settings().protein_target;
+  return {
+    weight: avg(S.data.weights.filter((w) => w.date >= from && w.date <= to).map((w) => w.kg)),
+    protein: days.filter((d) => proteinOn(d) >= target).length,
+    days: days.length,
+    checks: Object.fromEntries(S.data.checklist_items.map((it) => [it.id, days.filter((d) => isChecked(d, it.id)).length])),
+    sins: sumRange('sin', from, to),
   };
-  $('#day-notes').addEventListener('input', () => { clearTimeout(notesTimer); notesTimer = setTimeout(saveNotes, 1000); });
-  $('#day-notes').addEventListener('change', saveNotes);
-
-  $('#weight-form').addEventListener('submit', (e) => {
-    e.preventDefault();
-    const kg = r1(parseFloat(String($('#kg').value).replace(',', '.')));
-    if (!(kg >= 30 && kg <= 250)) { toast('משקל לא תקין'); return; }
-    setWeight(S.day, kg);
-    $('#kg').blur();
-    toast(`נשמר: ${kg.toFixed(1)} ק״ג`);
-  });
-
-  const go = (n) => setDay(addDays(S.day, n));
-  $('#prev-day').addEventListener('click', () => go(-1));
-  $('#next-day').addEventListener('click', () => go(1));
-  $('#day').addEventListener('change', (e) => { if (e.target.value) setDay(e.target.value); });
+}
+function renderWeekly() {
+  if (!S.data) return;
+  const cur = weekStart(todayISO());
+  const a = weekStats(cur), b = weekStats(addDays(cur, -7));
+  const kg = (s) => (s.weight == null ? '—' : s.weight.toFixed(1));
+  const change = a.weight != null && b.weight != null ? ` (${signed(r1(a.weight - b.weight))})` : '';
+  const rows = [
+    ['ממוצע משקל', kg(a) + change, kg(b)],
+    ['ימים ביעד החלבון', `${a.protein} / ${a.days}`, `${b.protein} / ${b.days}`],
+    ...S.data.checklist_items.map((it) => [it.label, String(a.checks[it.id]), String(b.checks[it.id])]),
+    ['חטאים (קל׳)', fmtInt(a.sins), fmtInt(b.sins)],
+  ];
+  $('#weekly tbody').replaceChildren(...rows.map((r) => el('tr', {}, el('th', {}, r[0]), el('td', { class: 'num' }, r[1]), el('td', { class: 'num muted' }, r[2]))));
+  $('#weekly thead th:nth-child(2)').textContent = `השבוע (${fmtDate(cur)})`;
 }
 
-// ---------- כפתורים מהירים ----------
-const fmtG = (g) => (Math.round(g * 10) / 10).toString();
+function renderStats() {
+  if (!S.data) return;
+  const p = S.data.plan;
+  const last = S.data.weights.at(-1);
+  const today = todayISO();
+  const cells = [
+    ['משקל אחרון', last ? `${last.kg.toFixed(1)} ק״ג` : '—'],
+    ['יעד להיום', `${targetFor(today).toFixed(1)} ק״ג`],
+    ['ירדת', last ? `${r1(p.start_kg - last.kg).toFixed(1)} ק״ג` : '—'],
+    ['נשאר לסיום', last ? `${Math.max(0, r1(last.kg - p.end_kg)).toFixed(1)} ק״ג` : '—'],
+    ['מול התוכנית', last ? signed(r1(last.kg - targetFor(last.date))) : '—'],
+    ['ימים לסיום', String(Math.max(0, daysBetween(today, p.end)))],
+  ];
+  $('#stats').replaceChildren(...cells.map(([k, v]) => el('div', {}, el('span', { class: 'muted' }, k), el('strong', {}, v))));
+}
 
-function renderFoods() {
-  if (!S.summary) return;
-  const box = $('#foods');
-  box.classList.toggle('editing', S.editingFoods);
-  $('#foods-edit').textContent = S.editingFoods ? 'סיום' : 'עריכה';
-  $('#food-add').hidden = !S.editingFoods;
-  box.replaceChildren(...S.summary.foods.map((f) => {
-    const b = document.createElement('button');
-    b.type = 'button';
-    const name = document.createElement('span'); name.textContent = f.name;
-    const g = document.createElement('small'); g.textContent = `+${fmtG(f.protein_g)} ג׳`;
-    b.append(name, g);
-    b.addEventListener('click', () => {
-      if (S.editingFoods) {
-        if (confirm(`למחוק את הכפתור "${f.name}"?`)) {
-          S.summary.foods = S.summary.foods.filter((x) => x.id !== f.id);
-          renderFoods();
-          write('DELETE', '/api/foods/' + encodeURIComponent(f.id));
-        }
-        return;
-      }
-      addProtein(Math.round(f.protein_g));
-      toast(`+${fmtG(f.protein_g)} ג׳ · ${f.name}`);
-    });
-    return b;
+// ---------- טבלה ----------
+function renderTable() {
+  if (!S.data || document.activeElement?.dataset?.week) return; // לא לדרוס הקלדה
+  const today = todayISO();
+  $('#weeks tbody').replaceChildren(...S.data.weeks.map((wk) => {
+    const inRange = (x) => x.date >= wk.from && x.date <= wk.date;
+    const a = avg(S.data.weights.filter(inRange).map((w) => w.kg));
+    const waist = avg(S.data.waist.filter(inRange).map((w) => w.cm));
+    const sins = sumRange('sin', wk.from, wk.date);
+    const inp = el('input', { value: wk.notes || '', maxlength: '2000', 'aria-label': `הערות לשבוע ${wk.week}`,
+      on: { change: (e) => write('PATCH', `/api/weeks/${wk.week}`, { notes: e.target.value }) } });
+    inp.dataset.week = wk.week;
+    return el('tr', { class: today >= wk.from && today <= wk.date ? 'current' : '' },
+      el('td', { class: 'num' }, String(wk.week)),
+      el('td', {}, fmtDate(wk.date, true)),
+      el('td', { class: 'num' }, wk.target_kg.toFixed(1)),
+      el('td', { class: a == null ? 'num' : `num ${a <= wk.target_kg + 0.05 ? 'good' : 'bad'}` }, a == null ? '—' : a.toFixed(1)),
+      el('td', { class: 'num' }, waist == null ? '—' : waist.toFixed(1)),
+      el('td', { class: 'num' }, sins ? fmtInt(sins) : '—'),
+      el('td', {}, inp));
   }));
+
+  const recent = S.data.weights.slice(-14).reverse();
+  $('#recent').replaceChildren(...(recent.length ? recent.map((w) => el('li', {},
+    el('span', {}, `${fmtDate(w.date, true)} · ${w.kg.toFixed(1)} ק״ג`),
+    el('button', { type: 'button', class: 'subtle', on: { click: async () => {
+      if (await confirmModal('מחיקת שקילה', `למחוק את השקילה מ-${fmtDate(w.date, true)}?`, 'מחק')) {
+        write('DELETE', '/api/weights/' + w.date);
+      }
+    } } }, 'מחק'))) : [el('li', { class: 'muted' }, 'אין עדיין שקילות')]));
 }
 
-function newId() {
-  return (crypto.randomUUID && crypto.randomUUID()) || `f${Date.now()}${Math.random().toString(36).slice(2)}`;
+// ---------- הגדרות ----------
+function editList(container, items, fields, path, makeNew) {
+  const row = (it) => {
+    const inputs = fields.map((f) => el('input', {
+      type: 'text', value: String(it[f.key] ?? ''), placeholder: f.label, 'aria-label': f.label,
+      inputmode: f.num ? 'decimal' : 'text', maxlength: f.max || '60', class: f.cls || '', autocomplete: 'off',
+    }));
+    const save = () => {
+      const body = {};
+      for (const [i, f] of fields.entries()) {
+        const v = f.num ? parseNum(inputs[i].value) : inputs[i].value.trim();
+        if (f.num ? !(v >= 0) : (!v && f.required)) { toast(`${f.label}: ערך לא תקין`); inputs[i].value = it[f.key] ?? ''; return; }
+        body[f.key] = v;
+      }
+      write('PUT', `${path}/${encodeURIComponent(it.id)}`, body);
+      Object.assign(it, body);
+      toast('נשמר');
+    };
+    inputs.forEach((i) => i.addEventListener('change', save));
+    const del = el('button', { type: 'button', class: 'x', 'aria-label': 'מחק', on: { click: async () => {
+      const name = it[fields.find((f) => f.required).key];
+      if (await confirmModal('מחיקה', `למחוק את "${name}"?`, 'מחק')) {
+        write('DELETE', `${path}/${encodeURIComponent(it.id)}`);
+        renderSettings();
+      }
+    } } }, '✕');
+    return el('div', { class: 'edit-row' }, ...inputs, del);
+  };
+  const addInputs = fields.map((f) => el('input', {
+    type: 'text', placeholder: f.label, 'aria-label': f.label, inputmode: f.num ? 'decimal' : 'text',
+    maxlength: f.max || '60', class: f.cls || '', autocomplete: 'off',
+  }));
+  const addForm = el('form', { class: 'edit-row add', on: { submit: (e) => {
+    e.preventDefault();
+    const body = {};
+    for (const [i, f] of fields.entries()) {
+      const v = f.num ? parseNum(addInputs[i].value) : addInputs[i].value.trim();
+      if (f.num ? !(v >= 0) : (!v && f.required)) { toast(`${f.label}: חסר או לא תקין`); return; }
+      body[f.key] = v;
+    }
+    write('PUT', `${path}/${newId()}`, body);
+    renderSettings();
+    toast('נוסף');
+  } } }, ...addInputs, el('button', { type: 'submit', class: 'primary' }, 'הוסף'));
+  container.replaceChildren(...items.map(row), addForm);
 }
 
-function saveFood(name, protein_g) {
-  const food = { id: newId(), name, protein_g: Math.round(protein_g * 10) / 10 };
-  S.summary.foods.push(food);
-  renderFoods();
-  write('PUT', '/api/foods/' + encodeURIComponent(food.id), { name: food.name, protein_g: food.protein_g });
-  toast(`נשמר כפתור: ${name}`);
+function renderSettings() {
+  if (!S.data) return;
+  const st = settings();
+  $('#set-protein').value = st.protein_target;
+  $('#set-budget').value = st.sin_budget;
+  $('#set-deficit').value = st.deficit_daily;
+  editList($('#edit-foods'), S.data.foods,
+    [{ key: 'name', label: 'שם', required: true }, { key: 'protein_g', label: 'ג׳', num: true, cls: 'narrow' }], '/api/foods');
+  editList($('#edit-sins'), S.data.sin_items,
+    [{ key: 'emoji', label: '🙂', cls: 'emoji-in', max: '8' }, { key: 'name', label: 'שם', required: true },
+     { key: 'kcal', label: 'קל׳', num: true, cls: 'narrow' }], '/api/sin-items');
+  editList($('#edit-checks'), S.data.checklist_items,
+    [{ key: 'label', label: 'פריט', required: true }], '/api/checklist-items');
 }
 
-// ---------- הערכת חלבון עם Claude ----------
+function renderAll() {
+  if (!S.data) return;
+  renderToday();
+  renderWeekly();
+  renderChart();
+  renderWaistChart();
+  renderStats();
+  renderTable();
+}
+
+// ---------- Claude ----------
 async function runEstimate() {
   const text = $('#ai-text').value.trim();
   if (text.length < 2) { $('#ai-text').focus(); return; }
@@ -361,252 +649,55 @@ async function runEstimate() {
   btn.textContent = 'מחשב…';
   out.replaceChildren();
   try {
-    const r = await api('POST', '/api/protein/estimate', { text });
-    renderEstimate(r);
+    renderEstimate(await api('POST', '/api/protein/estimate', { text }));
   } catch (e) {
-    const p = document.createElement('p');
-    p.className = 'error';
-    p.textContent = e instanceof TypeError ? 'אין חיבור לשרת' : e.message;
-    out.append(p);
+    out.append(el('p', { class: 'error' }, e instanceof TypeError ? 'אין חיבור לשרת' : e.message));
   } finally {
     btn.disabled = false;
     btn.textContent = '✨ חשב חלבון עם Claude';
   }
 }
-
 function renderEstimate(r) {
   const out = $('#ai-result');
   const nodes = r.items.map((it) => {
-    const row = document.createElement('div');
-    row.className = 'ai-item';
-    const txt = document.createElement('div'); txt.className = 'txt';
-    const n = document.createElement('span'); n.textContent = it.name;
-    const a = document.createElement('small'); a.textContent = it.amount;
-    txt.append(n, a);
-    const g = document.createElement('strong'); g.textContent = `${fmtG(it.protein_g)} ג׳`;
-    const save = document.createElement('button');
-    save.type = 'button'; save.textContent = '☆';
-    save.setAttribute('aria-label', `שמור "${it.name}" ככפתור מהיר`);
-    save.title = 'שמור ככפתור מהיר';
-    save.addEventListener('click', () => {
+    const save = el('button', { type: 'button', title: 'שמור ככפתור מהיר', 'aria-label': `שמור "${it.name}" ככפתור מהיר`, on: { click: () => {
       if (save.classList.contains('saved')) return;
-      saveFood(`${it.name} ${it.amount}`.slice(0, 60), it.protein_g);
+      write('PUT', '/api/foods/' + newId(), { name: `${it.name} ${it.amount}`.slice(0, 60), protein_g: it.protein_g });
       save.classList.add('saved'); save.textContent = '★';
-    });
-    const add = document.createElement('button');
-    add.type = 'button'; add.textContent = '+';
-    add.setAttribute('aria-label', `הוסף ${it.name}`);
-    add.addEventListener('click', () => {
-      addProtein(Math.round(it.protein_g));
-      toast(`+${fmtG(it.protein_g)} ג׳ · ${it.name}`);
-    });
-    row.append(txt, g, add, save);
-    return row;
+      toast('נשמר ככפתור מהיר');
+    } } }, '☆');
+    return el('div', { class: 'ai-item' },
+      el('div', { class: 'txt' }, el('span', {}, it.name), el('small', {}, it.amount)),
+      el('strong', {}, `${fmtG(it.protein_g)} ג׳`),
+      el('button', { type: 'button', 'aria-label': `הוסף ${it.name}`, on: { click: () => addProtein(`${it.name} (${it.amount})`.slice(0, 80), it.protein_g) } }, '+'),
+      save);
   });
-  if (r.note) {
-    const p = document.createElement('p'); p.className = 'muted'; p.textContent = r.note;
-    nodes.push(p);
-  }
+  if (r.note) nodes.push(el('p', { class: 'muted' }, r.note));
   if (r.items.length) {
-    const all = document.createElement('button');
-    all.type = 'button'; all.className = 'primary big';
-    all.textContent = `הוסף הכול · ${r.total_g} ג׳`;
-    all.addEventListener('click', () => {
-      addProtein(r.total_g);
+    nodes.push(el('button', { type: 'button', class: 'primary big', on: { click: () => {
+      for (const it of r.items) addEntry(S.day, 'protein', `${it.name} (${it.amount})`.slice(0, 80), it.protein_g);
       toast(`+${r.total_g} ג׳`);
       $('#ai-text').value = '';
       out.replaceChildren();
-    });
-    nodes.push(all);
+    } } }, `הוסף הכול · ${r.total_g} ג׳`));
   }
   out.replaceChildren(...nodes);
 }
 
+// ---------- אירועים ----------
 function setDay(iso) {
   saveNotesNow();
   S.day = iso;
-  S.dayData = null;
-  $('#day').value = iso;
-  loadDay();
-}
-function saveNotesNow() {
-  if (S.dayData && $('#day-notes').value !== S.dayData.notes) saveDay({ notes: $('#day-notes').value });
-}
-
-function setWeight(date, kg) {
-  const w = S.summary.weights.filter((x) => x.date !== date);
-  if (kg != null) w.push({ date, kg });
-  w.sort((a, b) => a.date.localeCompare(b.date));
-  S.summary.weights = w;
   renderAll();
-  if (kg != null) write('PUT', '/api/weights/' + date, { kg });
-  else write('DELETE', '/api/weights/' + date);
+}
+let notesTimer;
+function saveNotesNow() {
+  clearTimeout(notesTimer);
+  if (!S.data) return;
+  const v = $('#day-notes').value;
+  if (v !== notesOn(S.day)) write('PATCH', '/api/days/' + S.day, { notes: v });
 }
 
-// ---------- ממוצעים שבועיים (מחושבים בצד הלקוח, כך שעובד גם אופליין) ----------
-function weekAverages() {
-  const ws = S.summary.weights;
-  return S.summary.weeks.map((wk) => {
-    const inWeek = ws.filter((w) => w.date >= wk.from && w.date <= wk.date);
-    const avg = inWeek.length ? inWeek.reduce((s, w) => s + w.kg, 0) / inWeek.length : null;
-    return { ...wk, avg_kg: avg, count: inWeek.length };
-  });
-}
-
-// ---------- גרף SVG ----------
-function el(tag, attrs, text) {
-  const n = document.createElementNS('http://www.w3.org/2000/svg', tag);
-  for (const k in attrs) n.setAttribute(k, attrs[k]);
-  if (text != null) n.textContent = text;
-  return n;
-}
-
-function renderChart() {
-  const box = $('#chart');
-  if (!S.summary || !box.offsetParent) return; // מצויר רק כשהטאב גלוי
-  const p = S.summary.plan;
-  const ws = S.summary.weights;
-  const weeks = weekAverages();
-  const W = 360, H = 240, m = { l: 30, r: 10, t: 10, b: 26 };
-
-  let x0 = p.start, x1 = p.end;
-  if (ws.length) {
-    if (ws[0].date < x0) x0 = ws[0].date;
-    if (ws[ws.length - 1].date > x1) x1 = ws[ws.length - 1].date;
-  }
-  const span = Math.max(1, daysBetween(x0, x1));
-  const kgs = ws.map((w) => w.kg).concat([p.start_kg, p.end_kg]);
-  const y0 = Math.floor(Math.min(...kgs) - 0.5), y1 = Math.ceil(Math.max(...kgs) + 0.5);
-  const X = (iso) => m.l + (W - m.l - m.r) * daysBetween(x0, iso) / span;
-  const Y = (kg) => m.t + (H - m.t - m.b) * (y1 - kg) / (y1 - y0);
-
-  const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, direction: 'ltr', role: 'img', 'aria-label': 'גרף משקל מול יעד' });
-  const step = y1 - y0 > 12 ? 2 : 1;
-  for (let kg = y0; kg <= y1; kg += step) {
-    svg.append(el('line', { x1: m.l, x2: W - m.r, y1: Y(kg), y2: Y(kg), stroke: 'var(--line)', 'stroke-width': 1 }));
-    svg.append(el('text', { x: m.l - 4, y: Y(kg) + 3, 'text-anchor': 'end' }, kg));
-  }
-  // תחילת כל חודש
-  const d = new Date(x0 + 'T12:00:00');
-  d.setDate(1);
-  for (;;) {
-    d.setMonth(d.getMonth() + 1);
-    const iso = isoLocal(d);
-    if (iso > x1) break;
-    const x = X(iso);
-    svg.append(el('line', { x1: x, x2: x, y1: m.t, y2: H - m.b, stroke: 'var(--line)', 'stroke-dasharray': '2 3' }));
-    svg.append(el('text', { x, y: H - m.b + 14, 'text-anchor': 'middle' }, MONTHS[d.getMonth()]));
-  }
-  // היום
-  const today = todayISO();
-  if (today >= x0 && today <= x1) {
-    svg.append(el('line', { x1: X(today), x2: X(today), y1: m.t, y2: H - m.b, stroke: 'var(--muted)', 'stroke-width': 1, opacity: 0.6 }));
-  }
-  // קו יעד
-  svg.append(el('line', {
-    x1: X(p.start), y1: Y(p.start_kg), x2: X(p.end), y2: Y(p.end_kg),
-    stroke: 'var(--target)', 'stroke-width': 2, 'stroke-dasharray': '6 4',
-  }));
-  // שקילות בפועל
-  if (ws.length) {
-    svg.append(el('polyline', {
-      points: ws.map((w) => `${X(w.date)},${Y(w.kg)}`).join(' '),
-      fill: 'none', stroke: 'var(--actual)', 'stroke-width': 1.2, opacity: 0.6,
-    }));
-    for (const w of ws) svg.append(el('circle', { cx: X(w.date), cy: Y(w.kg), r: 2.5, fill: 'var(--actual)' }));
-  }
-  // ממוצע שבועי
-  const avgs = weeks.filter((w) => w.avg_kg != null);
-  if (avgs.length) {
-    svg.append(el('polyline', {
-      points: avgs.map((w) => `${X(w.date)},${Y(w.avg_kg)}`).join(' '),
-      fill: 'none', stroke: 'var(--avg)', 'stroke-width': 2.5, 'stroke-linejoin': 'round',
-    }));
-    for (const w of avgs) svg.append(el('circle', { cx: X(w.date), cy: Y(w.avg_kg), r: 4, fill: 'var(--avg)' }));
-  }
-  box.replaceChildren(svg);
-}
-
-function renderStats() {
-  const p = S.summary.plan;
-  const ws = S.summary.weights;
-  const last = ws[ws.length - 1];
-  const today = todayISO();
-  const t = targetFor(today);
-  const left = Math.max(0, daysBetween(today, p.end));
-  const cells = [
-    ['משקל אחרון', last ? `${last.kg.toFixed(1)} ק״ג` : '—'],
-    ['יעד להיום', `${t.toFixed(1)} ק״ג`],
-    ['ירדת', last ? `${r1(p.start_kg - last.kg).toFixed(1)} ק״ג` : '—'],
-    ['נשאר לסיום', last ? `${Math.max(0, r1(last.kg - p.end_kg)).toFixed(1)} ק״ג` : '—'],
-    ['מול הקו', last ? '\u200e' + `${r1(last.kg - targetFor(last.date)) > 0 ? '+' : ''}${r1(last.kg - targetFor(last.date)).toFixed(1)}` : '—'],
-    ['ימים לסיום', String(left)],
-  ];
-  $('#stats').replaceChildren(...cells.map(([k, v]) => {
-    const div = document.createElement('div');
-    const s = document.createElement('span'); s.className = 'muted'; s.textContent = k;
-    const b = document.createElement('strong'); b.textContent = v;
-    div.append(s, b);
-    return div;
-  }));
-}
-
-// ---------- טבלה ----------
-function renderTable() {
-  const today = todayISO();
-  const tbody = $('#weeks tbody');
-  const focused = document.activeElement?.dataset?.week;
-  if (focused) return; // לא לדרוס הקלדה פעילה
-  tbody.replaceChildren(...weekAverages().map((wk) => {
-    const tr = document.createElement('tr');
-    if (today >= wk.from && today <= wk.date) tr.className = 'current';
-    const td = (text, cls) => { const c = document.createElement('td'); c.textContent = text; if (cls) c.className = cls; return c; };
-    const avgCls = wk.avg_kg == null ? 'num' : `num ${wk.avg_kg <= wk.target_kg + 0.05 ? 'good' : 'bad'}`;
-    const notes = document.createElement('td');
-    const inp = document.createElement('input');
-    inp.value = wk.notes || '';
-    inp.maxLength = 2000;
-    inp.dataset.week = wk.week;
-    inp.setAttribute('aria-label', `הערות לשבוע ${wk.week}`);
-    inp.addEventListener('change', () => {
-      const w = S.summary.weeks.find((x) => x.week === wk.week);
-      w.notes = inp.value;
-      write('PATCH', `/api/weeks/${wk.week}`, { notes: inp.value });
-    });
-    notes.append(inp);
-    tr.append(
-      td(wk.week, 'num'),
-      td(fmtDate(wk.date, true)),
-      td(wk.target_kg.toFixed(1), 'num'),
-      td(wk.avg_kg == null ? '—' : wk.avg_kg.toFixed(1), avgCls),
-      notes,
-    );
-    return tr;
-  }));
-
-  const recent = S.summary.weights.slice(-14).reverse();
-  $('#recent').replaceChildren(...(recent.length ? recent.map((w) => {
-    const li = document.createElement('li');
-    const s = document.createElement('span');
-    s.textContent = `${fmtDate(w.date, true)} · ${w.kg.toFixed(1)} ק״ג`;
-    const b = document.createElement('button');
-    b.type = 'button'; b.className = 'danger'; b.textContent = 'מחק';
-    b.addEventListener('click', () => { if (confirm(`למחוק את השקילה מ-${fmtDate(w.date, true)}?`)) setWeight(w.date, null); });
-    li.append(s, b);
-    return li;
-  }) : [Object.assign(document.createElement('li'), { textContent: 'אין עדיין שקילות', className: 'muted' })]));
-}
-
-function renderAll() {
-  if (!S.summary) return;
-  renderFoods();
-  renderDay();
-  renderChart();
-  renderStats();
-  renderTable();
-}
-
-// ---------- טאבים, ערכת צבעים, יציאה ----------
 function showTab(name) {
   document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.id === 'tab-' + name));
   document.querySelectorAll('.tabs button').forEach((b) => {
@@ -614,7 +705,9 @@ function showTab(name) {
     b.setAttribute('aria-selected', String(b.dataset.tab === name));
   });
   try { localStorage.setItem('dt_tab', name); } catch { /* */ }
-  if (name === 'chart') renderChart();
+  window.scrollTo(0, 0);
+  if (name === 'chart') { renderChart(); renderWaistChart(); }
+  if (name === 'settings') renderSettings();
 }
 
 const THEMES = ['auto', 'light', 'dark'];
@@ -624,9 +717,67 @@ function applyTheme(t) {
   else document.documentElement.dataset.theme = t;
 }
 
-function init() {
-  buildTodayControls();
+function bind() {
   document.querySelectorAll('.tabs button').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
+  document.querySelectorAll('[data-goto]').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.goto)));
+
+  $('#prev-day').addEventListener('click', () => setDay(addDays(S.day, -1)));
+  $('#next-day').addEventListener('click', () => setDay(addDays(S.day, 1)));
+  $('#day').addEventListener('change', (e) => { if (e.target.value) setDay(e.target.value); });
+
+  $('#weight-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const kg = r1(parseNum($('#kg').value));
+    if (!(kg >= 30 && kg <= 250)) { toast('משקל לא תקין'); return; }
+    $('#kg').blur();
+    write('PUT', '/api/weights/' + S.day, { kg });
+    toast(`נשמר: ${kg.toFixed(1)} ק״ג`);
+    maybeAskMorning();
+  });
+  $('#waist-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const cm = r1(parseNum($('#waist').value));
+    if (!(cm >= 40 && cm <= 200)) { toast('היקף לא תקין'); return; }
+    $('#waist').blur();
+    write('PUT', '/api/waist/' + S.day, { cm });
+    toast(`נשמר: ${cm.toFixed(1)} ס״מ`);
+  });
+  $('#morning-done').addEventListener('click', () => { morningOpenFor = null; renderMorning(); });
+
+  $('#custom-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const g = parseNum($('#custom-g').value);
+    if (!(g > 0 && g <= 300)) { toast('כמות לא תקינה'); return; }
+    addProtein('ידני', g);
+    $('#custom-g').value = '';
+  });
+  $('#reset').addEventListener('click', async () => {
+    const list = entriesOn(S.day).filter((e) => e.kind === 'protein');
+    if (!list.length) { toast('אין חלבון לאפס'); return; }
+    const ok = await confirmModal('לאפס את החלבון של היום?',
+      `${list.length} הזנות חלבון (${fmtInt(proteinOn(S.day))} ג׳) יימחקו. חטאים לא נמחקים.`, 'אפס');
+    if (ok) { list.forEach((e) => delEntry(e.id)); toast('החלבון של היום אופס'); }
+  });
+  $('#undo').addEventListener('click', () => {
+    const last = entriesOn(S.day).at(-1);
+    if (last) { delEntry(last.id); toast(`בוטל: ${last.name}`); }
+  });
+  $('#ai-go').addEventListener('click', runEstimate);
+
+  $('#day-notes').addEventListener('input', () => { clearTimeout(notesTimer); notesTimer = setTimeout(saveNotesNow, 1000); });
+  $('#day-notes').addEventListener('change', saveNotesNow);
+
+  $('#goals-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const body = { protein_target: parseNum($('#set-protein').value), sin_budget: parseNum($('#set-budget').value),
+      deficit_daily: parseNum($('#set-deficit').value) };
+    if (!(body.protein_target >= 10 && body.protein_target <= 400)) { toast('יעד חלבון: 10–400'); return; }
+    if (!(body.sin_budget >= 0 && body.sin_budget <= 20000)) { toast('תקציב חטאים לא תקין'); return; }
+    if (!(body.deficit_daily >= 50 && body.deficit_daily <= 3000)) { toast('גירעון יומי: 50–3000'); return; }
+    write('PUT', '/api/settings', body);
+    toast('היעדים נשמרו');
+  });
+
   let theme = 'auto';
   try { theme = localStorage.getItem('dt_theme') || 'auto'; } catch { /* */ }
   applyTheme(theme);
@@ -637,39 +788,40 @@ function init() {
     toast('מצב תצוגה: ' + THEME_NAMES[theme]);
   });
   $('#logout').addEventListener('click', async () => {
-    if (!confirm('להתנתק?')) return;
+    if (!(await confirmModal('להתנתק?', '', 'יציאה'))) return;
     try { await fetch('/api/logout', { method: 'POST', credentials: 'same-origin' }); } catch { /* */ }
     if (window.caches) for (const k of await caches.keys()) if (k.startsWith('dt-data')) await caches.delete(k);
     location.replace('/login');
   });
 
-  let tab = 'today';
-  try { tab = localStorage.getItem('dt_tab') || 'today'; } catch { /* */ }
-  showTab(tab);
-
-  window.addEventListener('online', () => { updateNet(); flush().then(refresh); });
+  window.addEventListener('online', () => { updateNet(); flush().then(loadData); });
   window.addEventListener('offline', updateNet);
-  window.addEventListener('resize', renderChart);
+  window.addEventListener('resize', () => { renderChart(); renderWaistChart(); });
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return;
     const now = todayISO();
     if (now !== S.lastToday) {
-      if (S.day === S.lastToday) S.day = now; // יום חדש — המונה "מתאפס" כי עוברים לרשומה חדשה
+      if (S.day === S.lastToday) S.day = now; // יום חדש — המונים "מתאפסים" כי עוברים לתאריך חדש
       S.lastToday = now;
     }
     refresh();
   });
-
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
-  updateNet();
-  refresh();
-  setInterval(() => { if (loadOutbox().length && navigator.onLine) flush(); }, 30000);
 }
 
 async function refresh() {
   if (loadOutbox().length && navigator.onLine) await flush();
-  await loadSummary();
-  await loadDay();
+  await loadData();
+}
+
+function init() {
+  bind();
+  let tab = 'today';
+  try { tab = localStorage.getItem('dt_tab') || 'today'; } catch { /* */ }
+  showTab(tab);
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+  updateNet();
+  refresh();
+  setInterval(() => { if (loadOutbox().length && navigator.onLine) flush(); }, 30000);
 }
 
 init();

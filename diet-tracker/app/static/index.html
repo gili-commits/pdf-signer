@@ -15,11 +15,10 @@
     <h1>מעקב משקל</h1>
     <span id="net" class="pill" hidden></span>
     <button id="theme" class="icon-btn" aria-label="החלפת מצב בהיר/כהה">◐</button>
-    <button id="logout" class="text-btn">יציאה</button>
   </header>
 
   <main>
-    <!-- היום -->
+    <!-- ===================== היום ===================== -->
     <section id="tab-today" class="tab active">
       <div class="day-nav">
         <button id="prev-day" class="icon-btn" aria-label="יום קודם">›</button>
@@ -27,81 +26,174 @@
         <button id="next-day" class="icon-btn" aria-label="יום הבא">‹</button>
       </div>
 
+      <!-- שקילה -->
       <div class="card">
         <h2>שקילה</h2>
         <form id="weight-form" class="inline">
-          <input id="kg" type="number" inputmode="decimal" step="0.1" min="30" max="250" placeholder="ק״ג" aria-label="משקל בק״ג">
+          <input id="kg" type="text" inputmode="decimal" placeholder="ק״ג" aria-label="משקל בק״ג" autocomplete="off">
           <button type="submit" class="primary">שמור</button>
         </form>
         <p id="weight-info" class="muted"></p>
+
+        <form id="waist-form" class="waist">
+          <label for="waist">היקף מותניים (ס״מ) <small class="muted">· פעם בשבוע</small></label>
+          <div class="inline">
+            <input id="waist" type="text" inputmode="decimal" placeholder="ס״מ" autocomplete="off">
+            <button type="submit">שמור</button>
+          </div>
+          <p id="waist-info" class="muted"></p>
+        </form>
+
+        <div id="morning" class="morning" hidden>
+          <p class="morning-q">היה משהו אתמול? 🤔</p>
+          <div id="morning-sins" class="sins"></div>
+          <ul id="morning-log" class="log"></ul>
+          <button id="morning-done" type="button" class="big">לא, היה נקי ✨</button>
+        </div>
       </div>
 
+      <!-- חלבון -->
       <div class="card">
         <h2>חלבון</h2>
-        <div class="protein-total"><strong id="protein">0</strong> ג׳ <span class="muted">/ יעד 130–150</span></div>
-        <div class="bar"><div id="protein-bar"></div><div class="bar-mark" style="inset-inline-start:86.7%"></div></div>
+        <div class="protein-total">
+          <span><strong id="protein">0</strong> ג׳</span>
+          <span id="protein-status" class="status"></span>
+        </div>
+        <div class="bar"><div id="protein-bar"></div><div id="protein-mark" class="bar-mark"></div></div>
+
         <div id="ai-box" class="ai-box" hidden>
           <label for="ai-text">מה אכלת?</label>
           <textarea id="ai-text" rows="2" maxlength="500" placeholder="למשל: 150 ג׳ חזה עוף, 2 ביצים ויוגורט פרו"></textarea>
           <button id="ai-go" type="button" class="primary big">✨ חשב חלבון עם Claude</button>
           <div id="ai-result" class="ai-result" aria-live="polite"></div>
         </div>
+
         <div class="row-head">
           <span class="muted">כפתורים מהירים</span>
-          <button id="foods-edit" type="button" class="link-btn">עריכה</button>
+          <button type="button" class="link-btn" data-goto="settings">עריכה</button>
         </div>
         <div id="foods" class="foods"></div>
-        <form id="food-add" class="inline" hidden>
-          <input id="food-name" maxlength="60" placeholder="שם הפריט" aria-label="שם הפריט" required>
-          <input id="food-g" type="number" inputmode="decimal" min="0" max="300" step="0.5" placeholder="ג׳" aria-label="גרם חלבון" required class="narrow">
-          <button type="submit">הוסף כפתור</button>
+        <form id="custom-form" class="inline">
+          <input id="custom-g" type="text" inputmode="decimal" placeholder="כמות ידנית (ג׳)" aria-label="כמות חלבון ידנית" autocomplete="off">
+          <button type="submit">הוסף</button>
         </form>
         <div class="inline">
-          <input id="custom-g" type="number" inputmode="numeric" min="-200" max="300" placeholder="כמות ידנית (ג׳)" aria-label="כמות חלבון ידנית">
-          <button id="custom-add">הוסף</button>
-        </div>
-        <div class="inline">
-          <button id="undo">↶ בטל אחרון</button>
-          <button id="reset" class="danger">אפס יום</button>
+          <button id="reset" type="button" class="subtle">אפס חלבון להיום</button>
         </div>
       </div>
 
+      <!-- חטאים -->
       <div class="card">
-        <h2>צ׳ק-ליסט יומי</h2>
+        <h2>חטאים 😈</h2>
+        <div id="sins" class="sins"></div>
+        <div class="meter">
+          <div class="meter-text"><span id="sin-week"></span><span id="sin-days" class="muted"></span></div>
+          <div class="bar"><div id="sin-bar"></div></div>
+        </div>
+      </div>
+
+      <!-- רשימת ההזנות -->
+      <div class="card">
+        <div class="row-head">
+          <h2>ההזנות של היום</h2>
+          <button id="undo" type="button" class="link-btn">↶ בטל אחרון</button>
+        </div>
+        <ul id="log" class="log"></ul>
+      </div>
+
+      <!-- צ'ק-ליסט -->
+      <div class="card">
+        <div class="row-head">
+          <h2>צ׳ק-ליסט יומי</h2>
+          <button type="button" class="link-btn" data-goto="settings">עריכה</button>
+        </div>
         <div id="checks" class="checks"></div>
         <label for="day-notes" class="muted">הערות ליום</label>
         <textarea id="day-notes" rows="2" maxlength="2000"></textarea>
       </div>
     </section>
 
-    <!-- גרף -->
+    <!-- ===================== גרף ===================== -->
     <section id="tab-chart" class="tab">
       <div class="card">
-        <h2>התקדמות</h2>
+        <h2>סיכום שבועי</h2>
+        <div class="table-wrap">
+          <table id="weekly" class="weekly">
+            <thead><tr><th></th><th>השבוע</th><th>שבוע שעבר</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <p class="muted small">שבוע מתחיל ביום ראשון.</p>
+      </div>
+      <div class="card">
+        <h2>משקל</h2>
         <div id="chart" class="chart"></div>
         <div class="legend">
-          <span><i class="sw target"></i>קו יעד</span>
-          <span><i class="sw actual"></i>שקילה</span>
-          <span><i class="sw avg"></i>ממוצע שבועי</span>
+          <span><i class="sw target"></i>תוכנית</span>
+          <span><i class="dot actual"></i>שקילה</span>
+          <span><i class="sw avg"></i>ממוצע נע 7 ימים</span>
+          <span><i class="dot sin"></i>יום עם חטאים</span>
         </div>
+      </div>
+      <div class="card">
+        <h2>היקף מותניים</h2>
+        <div id="waist-chart" class="chart"></div>
       </div>
       <div class="card stats" id="stats"></div>
     </section>
 
-    <!-- טבלה -->
+    <!-- ===================== טבלה ===================== -->
     <section id="tab-table" class="tab">
       <div class="card">
         <h2>טבלת שקילות</h2>
         <div class="table-wrap">
           <table id="weeks">
-            <thead><tr><th>שבוע</th><th>תאריך</th><th>יעד</th><th>ממוצע</th><th>הערות</th></tr></thead>
+            <thead><tr><th>שבוע</th><th>תאריך</th><th>יעד</th><th>ממוצע</th><th>מותניים</th><th>חטאים</th><th>הערות</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
+        <p class="muted small">שבועות התוכנית (17 שבועות מ-18.11). התאריך הוא סוף השבוע; הממוצע, המותניים והחטאים מחושבים על 7 הימים שמסתיימים בו.</p>
       </div>
       <div class="card">
         <h2>שקילות אחרונות</h2>
         <ul id="recent" class="recent"></ul>
+      </div>
+    </section>
+
+    <!-- ===================== הגדרות ===================== -->
+    <section id="tab-settings" class="tab">
+      <div class="card">
+        <h2>יעדים</h2>
+        <form id="goals-form" class="settings-grid">
+          <label for="set-protein">יעד חלבון יומי (ג׳)</label>
+          <input id="set-protein" type="text" inputmode="decimal" autocomplete="off">
+          <label for="set-budget">תקציב חטאים שבועי (קל׳)</label>
+          <input id="set-budget" type="text" inputmode="decimal" autocomplete="off">
+          <label for="set-deficit">גירעון יומי (קל׳)</label>
+          <input id="set-deficit" type="text" inputmode="decimal" autocomplete="off">
+          <button type="submit" class="primary big">שמור יעדים</button>
+        </form>
+      </div>
+      <div class="card">
+        <h2>כפתורי חלבון</h2>
+        <div id="edit-foods" class="edit-list"></div>
+      </div>
+      <div class="card">
+        <h2>כפתורי חטאים</h2>
+        <div id="edit-sins" class="edit-list"></div>
+      </div>
+      <div class="card">
+        <h2>צ׳ק-ליסט</h2>
+        <p class="muted small">"עמידה ביעד החלבון" מסומן אוטומטית ולא מופיע כאן.</p>
+        <div id="edit-checks" class="edit-list"></div>
+      </div>
+      <div class="card">
+        <h2>גיבוי</h2>
+        <p class="muted">כל הנתונים נשמרים בשרת (קובץ SQLite) עם גיבוי לילי אוטומטי. כאן אפשר להוריד עותק של הכול כקובץ CSV שנפתח ב-Excel או ב-Google Sheets.</p>
+        <a class="button big" href="/api/export.csv" download>⬇️ ייצוא ל-CSV</a>
+      </div>
+      <div class="card" id="logout-card" hidden>
+        <button id="logout" type="button" class="big subtle">יציאה מהחשבון</button>
       </div>
     </section>
   </main>
@@ -110,7 +202,16 @@
     <button data-tab="today" class="active" role="tab">היום</button>
     <button data-tab="chart" role="tab">גרף</button>
     <button data-tab="table" role="tab">טבלה</button>
+    <button data-tab="settings" role="tab">הגדרות</button>
   </nav>
+
+  <dialog id="modal" class="modal">
+    <form method="dialog">
+      <h3 id="modal-title"></h3>
+      <div id="modal-body"></div>
+      <div id="modal-actions" class="modal-actions"></div>
+    </form>
+  </dialog>
 
   <script src="/static/app.js"></script>
 </body>
