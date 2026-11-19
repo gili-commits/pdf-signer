@@ -206,6 +206,7 @@ async function loadData() {
     if (!S.data) { toast('אין נתונים שמורים לצפייה אופליין'); return; }
   }
   for (const op of loadOutbox()) applyOp(op); // כתיבות שעוד לא הגיעו לשרת
+  S.data.advisor = S.data.advisor || [];
   $('#ai-box').hidden = !S.data.ai;
   $('#logout-card').hidden = S.data.auth === false;
   renderAll();
@@ -369,6 +370,84 @@ function renderToday() {
   if (document.activeElement !== $('#day-notes')) $('#day-notes').value = notesOn(d);
 
   renderMorning();
+  renderAdvisor();
+}
+
+// ---------- יועץ ----------
+const adv = { pending: null, error: '' }; // pending: {date, question}
+function suggestionLogged(date, sg) {
+  return S.data.entries.some((e) => e.date === date && e.kind === sg.kind && e.name === sg.name && Math.abs(e.amount - sg.amount) < 0.05);
+}
+function renderAdvisor() {
+  const card = $('#advisor-card');
+  card.hidden = !S.data.ai;
+  if (card.hidden) return;
+  const d = S.day;
+  const msgs = S.data.advisor.filter((m) => m.date === d)
+    .sort((a, b) => (Date.parse(a.created_at) || 0) - (Date.parse(b.created_at) || 0));
+  const nodes = msgs.map((m) => {
+    const bubble = el('div', { class: `msg ${m.role}` }, el('div', { class: 'msg-text' }, m.content));
+    if (m.role === 'assistant' && m.suggestions?.length) {
+      bubble.append(el('div', { class: 'sugg' }, ...m.suggestions.map((sg) => {
+        const done = suggestionLogged(d, sg);
+        const label = `${sg.emoji ? sg.emoji + ' ' : ''}${sg.name} · ${sg.kind === 'protein' ? fmtG(sg.amount) + ' ג׳ חלבון' : fmtInt(sg.amount) + ' קל׳'}`;
+        return el('button', { type: 'button', class: done ? 'done' : '', disabled: done,
+          'aria-label': done ? `${sg.name} כבר נרשם` : `רשום ${sg.name}`,
+          on: { click: () => { addEntry(d, sg.kind, sg.name, sg.amount, sg.emoji); toast(`נרשם: ${sg.name}`); } } },
+        done ? `✓ ${label}` : `רשום: ${label}`);
+      })));
+    }
+    return bubble;
+  });
+  if (adv.pending && adv.pending.date === d) {
+    nodes.push(el('div', { class: 'msg user' }, el('div', { class: 'msg-text' }, adv.pending.question)));
+    nodes.push(el('div', { class: 'msg assistant thinking' }, el('div', { class: 'msg-text' }, 'חושב…')));
+  }
+  if (adv.error) nodes.push(el('p', { class: 'error' }, adv.error));
+  $('#adv-thread').replaceChildren(...nodes);
+  $('#adv-hint').hidden = nodes.length > 0;
+  $('#adv-clear').hidden = !msgs.length;
+  $('#adv-send').disabled = !!adv.pending;
+  $('#adv-send').textContent = adv.pending ? 'חושב…' : msgs.length ? 'שאל עוד' : 'שאל';
+}
+async function askAdvisor(e) {
+  e.preventDefault();
+  const q = $('#adv-q').value.trim();
+  if (q.length < 2 || adv.pending) return;
+  if (!navigator.onLine) { toast('צריך חיבור לאינטרנט כדי לשאול'); return; }
+  const date = S.day;
+  const now = new Date();
+  adv.pending = { date, question: q };
+  adv.error = '';
+  $('#adv-q').value = '';
+  renderAdvisor();
+  try {
+    const r = await api('POST', '/api/advisor/' + date, {
+      question: q,
+      now_local: now.toLocaleString('he-IL', { weekday: 'long', day: 'numeric', month: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
+      tz_offset_min: now.getTimezoneOffset(),
+    });
+    S.data.advisor.push(...r.messages);
+  } catch (err) {
+    adv.error = err instanceof TypeError ? 'אין חיבור לשרת' : err.message;
+    $('#adv-q').value = q; // לא לאבד את השאלה
+  } finally {
+    adv.pending = null;
+    renderAdvisor();
+    const last = $('#adv-thread .msg.assistant:last-of-type');
+    if (last && !adv.error) last.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+}
+async function clearAdvisor() {
+  if (!(await confirmModal('שיחה חדשה?', 'השיחה של היום תימחק.', 'מחק'))) return;
+  try {
+    await api('DELETE', '/api/advisor/' + S.day);
+    S.data.advisor = S.data.advisor.filter((m) => m.date !== S.day);
+    adv.error = '';
+    renderAdvisor();
+  } catch (err) {
+    toast(err instanceof TypeError ? 'צריך חיבור כדי למחוק' : err.message);
+  }
 }
 
 // ---------- תזכורת בוקר ----------
@@ -763,6 +842,8 @@ function bind() {
     if (last) { delEntry(last.id); toast(`בוטל: ${last.name}`); }
   });
   $('#ai-go').addEventListener('click', runEstimate);
+  $('#adv-form').addEventListener('submit', askAdvisor);
+  $('#adv-clear').addEventListener('click', clearAdvisor);
 
   $('#day-notes').addEventListener('input', () => { clearTimeout(notesTimer); notesTimer = setTimeout(saveNotesNow, 1000); });
   $('#day-notes').addEventListener('change', saveNotesNow);

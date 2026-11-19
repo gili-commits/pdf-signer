@@ -225,3 +225,18 @@ button.x { min-height: 44px; min-width: 44px; padding: 0; border: 0; background:
 .chips { display: flex; gap: .4rem; flex-wrap: wrap; }
 .chip { flex: 1; min-height: 52px; }
 .chip[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); font-weight: 700; }
+
+/* ---- יועץ ---- */
+.thread { display: grid; gap: .6rem; margin-bottom: .7rem; }
+.thread:empty { display: none; }
+.msg { max-width: 88%; padding: .6rem .8rem; border-radius: 14px; line-height: 1.5; }
+.msg-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.msg.user { justify-self: start; background: var(--accent); color: var(--accent-fg); border-start-start-radius: 4px; }
+.msg.assistant { justify-self: end; background: var(--bg); border: 1px solid var(--line); border-start-end-radius: 4px; }
+.msg.thinking .msg-text { color: var(--muted); animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .4; } }
+@media (prefers-reduced-motion: reduce) { .msg.thinking .msg-text { animation: none; } }
+.sugg { display: grid; gap: .35rem; margin-top: .6rem; }
+.sugg button { min-height: 44px; text-align: start; font-size: .95rem; padding: .3rem .7rem; background: var(--card); }
+.sugg button.done { color: var(--ok); border-color: var(--ok); opacity: 1; }
+.adv-form { display: grid; gap: .5rem; }

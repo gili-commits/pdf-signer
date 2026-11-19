@@ -101,6 +101,20 @@
         <ul id="log" class="log"></ul>
       </div>
 
+      <!-- יועץ -->
+      <div class="card" id="advisor-card" hidden>
+        <div class="row-head">
+          <h2>יועץ 💬</h2>
+          <button id="adv-clear" type="button" class="link-btn">שיחה חדשה</button>
+        </div>
+        <p id="adv-hint" class="muted small">שאל על ארוחה, נשנוש או מה לאכול עכשיו. היועץ רואה מה נרשם היום ואתמול, כמה חלבון חסר ואת תקציב החטאים השבועי.</p>
+        <div id="adv-thread" class="thread" aria-live="polite"></div>
+        <form id="adv-form" class="adv-form">
+          <textarea id="adv-q" rows="2" maxlength="1000" placeholder="למשל: אכלתי שווארמה בצהריים, כדאי לי פיצה בערב?"></textarea>
+          <button id="adv-send" type="submit" class="primary big">שאל</button>
+        </form>
+      </div>
+
       <!-- צ'ק-ליסט -->
       <div class="card">
         <div class="row-head">

@@ -1,6 +1,6 @@
 'use strict';
 // להעלות את הגרסה בכל שינוי בקבצי המעטפת
-const VERSION = 'v4';
+const VERSION = 'v5';
 const SHELL_CACHE = `dt-shell-${VERSION}`;
 const DATA_CACHE = 'dt-data';
 const SHELL = [

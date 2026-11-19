@@ -77,6 +77,16 @@ CREATE TABLE IF NOT EXISTS waist(
   date TEXT PRIMARY KEY,
   cm   REAL NOT NULL
 );
+-- יועץ: שיחה לכל יום (טבלה חדשה בלבד, אין שינוי בקיימות)
+CREATE TABLE IF NOT EXISTS advisor_messages(
+  id          TEXT PRIMARY KEY,
+  date        TEXT NOT NULL,
+  role        TEXT NOT NULL,            -- user | assistant
+  content     TEXT NOT NULL,
+  suggestions TEXT NOT NULL DEFAULT '[]',
+  created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS advisor_date ON advisor_messages(date);
 """
 
 DEFAULT_FOODS = [

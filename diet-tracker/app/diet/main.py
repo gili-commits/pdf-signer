@@ -1,9 +1,11 @@
 import asyncio
 import csv
 import io
+import json
 import re
+import uuid
 from contextlib import asynccontextmanager
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
@@ -167,6 +169,7 @@ def summary():
             "foods": _rows(c, "SELECT id, name, protein_g FROM foods ORDER BY sort, rowid"),
             "sin_items": _rows(c, "SELECT id, emoji, name, kcal FROM sin_items ORDER BY sort, rowid"),
             "checklist_items": _rows(c, "SELECT id, label FROM checklist_items ORDER BY sort, rowid"),
+            "advisor": _advisor_rows(c, (date.today() - timedelta(days=14)).isoformat()),
         }
 
 
@@ -425,6 +428,126 @@ def export_csv():
     fname = f"diet-tracker-{date.today().isoformat()}.csv"
     return Response(buf.getvalue(), media_type="text/csv; charset=utf-8",
                     headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
+
+# --- יועץ ארוחות ---
+def _advisor_rows(c, since: str, only_date: str | None = None):
+    sql = "SELECT id, date, role, content, suggestions, created_at FROM advisor_messages WHERE date >= ?"
+    args = [since]
+    if only_date:
+        sql += " AND date = ?"
+        args.append(only_date)
+    rows = _rows(c, sql + " ORDER BY created_at, rowid", *args)
+    for r in rows:
+        r["suggestions"] = json.loads(r["suggestions"] or "[]")
+    return rows
+
+
+def _fmt(x, nd=1):
+    if not isinstance(x, float):
+        return str(x)
+    s = f"{x:.{nd}f}"
+    return s.rstrip("0").rstrip(".") if "." in s else s
+
+
+def build_context(c, d: date, tz_offset_min: int, now_local: str) -> str:
+    """תמונת מצב קומפקטית בעברית ליועץ. הכול מה-DB; שעות מוצגות לפי השעון של הטלפון."""
+    st = db.get_settings(c)
+    ds, yd = d.isoformat(), (d - timedelta(days=1)).isoformat()
+    shift = timedelta(minutes=-tz_offset_min)  # getTimezoneOffset בדפדפן: UTC פחות מקומי
+
+    def hhmm(ts: str) -> str:
+        try:
+            t = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        except ValueError:
+            return ""
+        if t.tzinfo is None:
+            return ""
+        return (t.astimezone(timezone.utc) + shift).strftime("%H:%M")
+
+    def day_lines(day: str):
+        rows = _rows(c, "SELECT * FROM entries WHERE date=? ORDER BY created_at", day)
+        prot = [f"{hhmm(e['created_at'])} {e['name']} ({_fmt(e['amount'])} ג׳ חלבון)".strip() for e in rows if e["kind"] == "protein"]
+        sins = [f"{hhmm(e['created_at'])} {e['emoji']} {e['name']} (~{_fmt(e['amount'], 0)} קל׳)".strip() for e in rows if e["kind"] == "sin"]
+        return rows, prot, sins
+
+    rows, prot, sins = day_lines(ds)
+    p_today = sum(e["amount"] for e in rows if e["kind"] == "protein")
+    _, _, y_sins = day_lines(yd)
+    y_prot = c.execute("SELECT COALESCE(SUM(amount),0) FROM entries WHERE date=? AND kind='protein'", (yd,)).fetchone()[0]
+
+    week_start = d - timedelta(days=(d.weekday() + 1) % 7)  # יום ראשון
+    week_end = week_start + timedelta(days=6)
+    week_sins = c.execute("SELECT COALESCE(SUM(amount),0) FROM entries WHERE kind='sin' AND date BETWEEN ? AND ?",
+                          (week_start.isoformat(), week_end.isoformat())).fetchone()[0]
+    budget = st["sin_budget"]
+
+    weights = _rows(c, "SELECT date, kg FROM weights WHERE date BETWEEN ? AND ? ORDER BY date",
+                    (d - timedelta(days=13)).isoformat(), ds)
+    last7 = [w["kg"] for w in weights if w["date"] >= (d - timedelta(days=6)).isoformat()]
+    prev7 = [w["kg"] for w in weights if w["date"] < (d - timedelta(days=6)).isoformat()]
+    target_today = plan.target_for(d)
+
+    checks = [r["label"] for r in c.execute(
+        "SELECT ci.label FROM day_checks dc JOIN checklist_items ci ON ci.id = dc.item_id WHERE dc.date=?", (ds,))]
+    p_target = st["protein_target"]
+
+    lines = [
+        f"עכשיו: {now_local}",
+        f"תוכנית: {plan.START_KG:g}→{plan.END_KG:g} ק״ג עד {plan.END.strftime('%d.%m.%Y')}. יעד הקו להיום: {target_today:.1f} ק״ג.",
+    ]
+    if weights:
+        w = weights[-1]
+        lines.append(f"שקילה אחרונה: {w['kg']:.1f} ק״ג ({w['date']}).")
+    if last7:
+        trend = f", לעומת {sum(prev7)/len(prev7):.1f} בשבוע שלפני" if prev7 else ""
+        lines.append(f"ממוצע 7 ימים: {sum(last7)/len(last7):.1f} ק״ג{trend}.")
+    lines += [
+        f"חלבון היום: {p_today:.0f} מתוך יעד {p_target:.0f} ג׳ (חסרים {max(0, p_target - p_today):.0f}).",
+        "נרשם היום (חלבון): " + ("; ".join(prot) if prot else "כלום"),
+        "נרשם היום (חטאים): " + ("; ".join(sins) if sins else "כלום"),
+        f"אתמול: {y_prot:.0f} ג׳ חלבון; חטאים: " + ("; ".join(y_sins) if y_sins else "כלום"),
+        f"תקציב חטאים שבועי (א׳–ש׳): נוצלו {week_sins:.0f} מתוך {budget:.0f} קל׳ (נשארו {max(0, budget - week_sins):.0f}). גירעון יומי מתוכנן: {st['deficit_daily']:.0f} קל׳.",
+        "צ׳ק-ליסט היום: " + (", ".join(checks) if checks else "לא סומן כלום"),
+    ]
+    return "\n".join(lines)
+
+
+class AskIn(BaseModel):
+    question: str = Field(min_length=2, max_length=1000)
+    now_local: str = Field("", max_length=40)
+    tz_offset_min: int = Field(0, ge=-840, le=840)
+
+
+@api.post("/advisor/{d}")
+def advisor_ask(d: date, body: AskIn):
+    ds = d.isoformat()
+    with db.tx() as c:
+        history = _advisor_rows(c, ds, ds)
+        context = build_context(c, d, body.tz_offset_min, body.now_local or ds)
+    try:
+        reply = ai.advise([{"role": m["role"], "content": m["content"]} for m in history],
+                          body.question.strip(), context)
+    except ai.AIError as e:
+        raise HTTPException(502, str(e))
+    now = datetime.now(timezone.utc)
+    user_msg = {"id": uuid.uuid4().hex, "date": ds, "role": "user", "content": body.question.strip(),
+                "suggestions": [], "created_at": now.isoformat()}
+    bot_msg = {"id": uuid.uuid4().hex, "date": ds, "role": "assistant", "content": reply["answer"],
+               "suggestions": reply["suggestions"], "created_at": (now + timedelta(milliseconds=1)).isoformat()}
+    with db.tx() as c:
+        for m in (user_msg, bot_msg):
+            c.execute("INSERT INTO advisor_messages(id, date, role, content, suggestions, created_at) "
+                      "VALUES (?,?,?,?,?,?)", (m["id"], ds, m["role"], m["content"],
+                                               json.dumps(m["suggestions"], ensure_ascii=False), m["created_at"]))
+    return {"messages": [user_msg, bot_msg]}
+
+
+@api.delete("/advisor/{d}")
+def advisor_clear(d: date):
+    with db.tx() as c:
+        c.execute("DELETE FROM advisor_messages WHERE date=?", (d.isoformat(),))
+    return {"ok": True}
 
 
 # --- Claude ---
