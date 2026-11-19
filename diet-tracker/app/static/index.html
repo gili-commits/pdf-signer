@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f766e">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/static/icons/icon-192.png">
+  <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+  <link rel="stylesheet" href="/static/style.css">
+  <title>מעקב משקל</title>
+</head>
+<body>
+  <header class="top">
+    <h1>מעקב משקל</h1>
+    <span id="net" class="pill" hidden></span>
+    <button id="theme" class="icon-btn" aria-label="החלפת מצב בהיר/כהה">◐</button>
+    <button id="logout" class="text-btn">יציאה</button>
+  </header>
+
+  <main>
+    <!-- היום -->
+    <section id="tab-today" class="tab active">
+      <div class="day-nav">
+        <button id="prev-day" class="icon-btn" aria-label="יום קודם">›</button>
+        <input type="date" id="day" aria-label="תאריך">
+        <button id="next-day" class="icon-btn" aria-label="יום הבא">‹</button>
+      </div>
+
+      <div class="card">
+        <h2>שקילה</h2>
+        <form id="weight-form" class="inline">
+          <input id="kg" type="number" inputmode="decimal" step="0.1" min="30" max="250" placeholder="ק״ג" aria-label="משקל בק״ג">
+          <button type="submit" class="primary">שמור</button>
+        </form>
+        <p id="weight-info" class="muted"></p>
+      </div>
+
+      <div class="card">
+        <h2>חלבון</h2>
+        <div class="protein-total"><strong id="protein">0</strong> ג׳ <span class="muted">/ יעד 130–150</span></div>
+        <div class="bar"><div id="protein-bar"></div><div class="bar-mark" style="inset-inline-start:86.7%"></div></div>
+        <div id="foods" class="foods"></div>
+        <div class="inline">
+          <input id="custom-g" type="number" inputmode="numeric" min="-200" max="300" placeholder="כמות ידנית (ג׳)" aria-label="כמות חלבון ידנית">
+          <button id="custom-add">הוסף</button>
+        </div>
+        <div class="inline">
+          <button id="undo">↶ בטל אחרון</button>
+          <button id="reset" class="danger">אפס יום</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>צ׳ק-ליסט יומי</h2>
+        <div id="checks" class="checks"></div>
+        <label for="day-notes" class="muted">הערות ליום</label>
+        <textarea id="day-notes" rows="2" maxlength="2000"></textarea>
+      </div>
+    </section>
+
+    <!-- גרף -->
+    <section id="tab-chart" class="tab">
+      <div class="card">
+        <h2>התקדמות</h2>
+        <div id="chart" class="chart"></div>
+        <div class="legend">
+          <span><i class="sw target"></i>קו יעד</span>
+          <span><i class="sw actual"></i>שקילה</span>
+          <span><i class="sw avg"></i>ממוצע שבועי</span>
+        </div>
+      </div>
+      <div class="card stats" id="stats"></div>
+    </section>
+
+    <!-- טבלה -->
+    <section id="tab-table" class="tab">
+      <div class="card">
+        <h2>טבלת שקילות</h2>
+        <div class="table-wrap">
+          <table id="weeks">
+            <thead><tr><th>שבוע</th><th>תאריך</th><th>יעד</th><th>ממוצע</th><th>הערות</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card">
+        <h2>שקילות אחרונות</h2>
+        <ul id="recent" class="recent"></ul>
+      </div>
+    </section>
+  </main>
+
+  <nav class="tabs" role="tablist">
+    <button data-tab="today" class="active" role="tab">היום</button>
+    <button data-tab="chart" role="tab">גרף</button>
+    <button data-tab="table" role="tab">טבלה</button>
+  </nav>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

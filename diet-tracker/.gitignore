@@ -1,0 +1,7 @@
+.env
+__pycache__/
+*.pyc
+*.db
+*.db-*
+backups/
+app/static/icons/*.png
