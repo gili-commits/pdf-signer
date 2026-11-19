@@ -68,6 +68,8 @@ def index(request: Request):
 
 @app.get("/login", include_in_schema=False)
 def login_page():
+    if not auth.ENABLED:
+        return RedirectResponse("/", status_code=303)
     return _page("login.html")
 
 
@@ -154,7 +156,7 @@ def summary():
         recent = [d["date"] for d in c.execute(
             "SELECT date FROM days ORDER BY date DESC LIMIT 14")]
         days = [_day_row(c, d) for d in recent]
-    return {"plan": plan.as_dict(), "weights": weights, "weeks": weeks, "recent_days": days}
+    return {"auth": auth.ENABLED, "plan": plan.as_dict(), "weights": weights, "weeks": weeks, "recent_days": days}
 
 
 class WeightIn(BaseModel):

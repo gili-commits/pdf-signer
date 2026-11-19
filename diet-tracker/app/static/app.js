@@ -168,6 +168,7 @@ async function loadSummary() {
   } catch (e) {
     if (!S.summary) { toast('אין נתונים שמורים לצפייה אופליין'); return; }
   }
+  $('#logout').hidden = S.summary.auth === false;
   applyOutbox();
   renderAll();
 }

@@ -131,3 +131,4 @@ td input { min-height: 40px; min-width: 130px; padding: .3rem .5rem; font-size: 
 .login h1 { margin: .5rem 0 1rem; font-size: 1.4rem; }
 .login img { border-radius: 20px; }
 .login form { text-align: start; display: grid; gap: .6rem; }
+[hidden] { display: none !important; }

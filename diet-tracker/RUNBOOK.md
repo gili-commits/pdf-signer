@@ -37,8 +37,12 @@ git init && git add -A && git commit -m "diet-tracker: initial"   # ריפו נ�
 
 cp .env.example .env
 chmod 600 .env
-nano .env        # למלא APP_PASSWORD ו-TS_AUTHKEY
+nano .env        # למלא TS_AUTHKEY; APP_PASSWORD — אופציונלי
 ```
+
+> **בלי סיסמה:** אם `APP_PASSWORD` ו-`APP_PASSWORD_HASH` ריקים, אין דף התחברות בכלל.
+> כל מכשיר ב-tailnet שלך יכול לפתוח את האפליקציה. למשתמש יחיד שה-tailnet שייך רק לו זה מספיק.
+> אם בעתיד תשתף את ה-tailnet עם מישהו, הוסף סיסמה (או ACL — סעיף 9).
 
 ### (מומלץ) hash במקום סיסמה בטקסט גלוי
 ```bash

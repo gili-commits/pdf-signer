@@ -15,11 +15,13 @@ SESSION_TTL = 30 * 24 * 3600
 COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "true").lower() == "true"
 
 _pw_hash: bytes | None = None
+# בלי סיסמה (שני המשתנים ריקים) — אין התחברות; הגבול היחיד הוא רשת ה-Tailscale.
+ENABLED = True
 
 
 def init_password():
     """APP_PASSWORD_HASH (bcrypt) עדיף; אחרת APP_PASSWORD מגובב בעלייה ונמחק מהסביבה."""
-    global _pw_hash
+    global _pw_hash, ENABLED
     raw = os.environ.pop("APP_PASSWORD", "")
     pre = os.environ.get("APP_PASSWORD_HASH", "").strip()
     if pre:
@@ -27,10 +29,13 @@ def init_password():
     elif raw:
         _pw_hash = bcrypt.hashpw(raw.encode()[:72], bcrypt.gensalt(12))
     else:
-        raise RuntimeError("חסר APP_PASSWORD או APP_PASSWORD_HASH")
+        ENABLED = False
+        print("auth: disabled (no APP_PASSWORD) — access limited by Tailscale only", flush=True)
 
 
 def check_password(pw: str) -> bool:
+    if not ENABLED:
+        return True
     try:
         return bcrypt.checkpw(pw.encode()[:72], _pw_hash)
     except ValueError:
@@ -51,6 +56,8 @@ def create_session() -> str:
 
 
 def session_valid(token: str | None) -> bool:
+    if not ENABLED:
+        return True
     if not token:
         return False
     with db.tx() as c:
